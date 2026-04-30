@@ -6,7 +6,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { loadConfig } from './config.js';
+import { loadConfigWithProjectLookup } from './config.js';
 import { CacheStore } from './cache.js';
 import { ToolRouter } from './proxy.js';
 import { UpstreamManager } from './upstream.js';
@@ -26,11 +26,7 @@ async function main() {
     process.exit(1);
   }
 
-  const configPath = args.configPath
-    ? new URL(`file://${args.configPath}`)
-    : new URL(`file://${process.env.HOME}/.mcp-cache-proxy/config.json`);
-
-  const config = await loadConfig(configPath);
+  const config = await loadConfigWithProjectLookup(args.configPath);
   const cache = new CacheStore(config.cache);
 
   if (args.mode !== 'server') {
