@@ -33,7 +33,7 @@ Create `~/.mcp-cache-proxy/config.json`:
   },
   "cache": {
     "path": "~/.mcp-cache-proxy/cache.db",
-    "maxSizeBytes": 104857100,
+    "maxSizeBytes": 104857600,
     "defaultTtlSeconds": 43200
   },
   "mode": "whitelist"
