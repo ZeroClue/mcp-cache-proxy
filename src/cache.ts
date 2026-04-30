@@ -52,11 +52,8 @@ export class CacheStore {
       );
     `);
 
-    // Initialize stats row if it doesn't exist
-    const statsExists = this.db.prepare('SELECT 1 FROM stats WHERE id = 1').get();
-    if (!statsExists) {
-      this.db.prepare('INSERT INTO stats (id, misses) VALUES (1, 0)').run();
-    }
+    // Initialize stats row using INSERT OR IGNORE
+    this.db.prepare('INSERT OR IGNORE INTO stats (id, misses) VALUES (1, 0)').run();
   }
 
   async get(key: string): Promise<unknown | null> {
@@ -103,7 +100,12 @@ export class CacheStore {
 
     // Delete the database file if it exists (for file-based databases)
     if (dbPath !== ':memory:' && existsSync(dbPath)) {
-      unlinkSync(dbPath);
+      try {
+        unlinkSync(dbPath);
+      } catch (error) {
+        // Log warning but continue if deletion fails
+        console.warn(`Failed to delete database file at ${dbPath}:`, error);
+      }
     }
 
     // Create a new database instance
@@ -114,11 +116,11 @@ export class CacheStore {
   async getStats(): Promise<CacheStats> {
     const totalRow = this.db.prepare('SELECT COUNT(*) as count FROM cache').get() as { count: number };
     const hitsRow = this.db.prepare('SELECT SUM(hits) as total FROM cache').get() as { total: number | null };
-    const missesRow = this.db.prepare('SELECT misses FROM stats WHERE id = 1').get() as { misses: number };
+    const missesRow = this.db.prepare('SELECT misses FROM stats WHERE id = 1').get() as { misses: number } | undefined;
 
     const cached = totalRow.count;
     const hits = hitsRow.total || 0;
-    const misses = missesRow.misses;
+    const misses = missesRow?.misses ?? 0;
     const hitRate = (hits + misses) > 0 ? hits / (hits + misses) : 0;
 
     // Calculate approximate database size

@@ -62,4 +62,50 @@ describe('CacheStore', () => {
     assert.strictEqual(stats.cached, 1);
     assert.strictEqual(stats.hits, 1);
   });
+
+  describe('miss tracking', () => {
+    it('should track misses for non-existent keys', async () => {
+      await cache.flush();
+      await cache.recreate(); // Reset stats by recreating the database
+      await cache.get('nonexistent_key');
+      await cache.get('another_nonexistent_key');
+      const stats = await cache.getStats();
+      assert.strictEqual(stats.misses, 2);
+      assert.strictEqual(stats.hits, 0);
+    });
+
+    it('should count expired entries as misses', async () => {
+      await cache.flush();
+      await cache.recreate(); // Reset stats by recreating the database
+      await cache.set('expired_key', 'test_tool', { query: 'test' }, { result: 'data' }, 0);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await cache.get('expired_key');
+      const stats = await cache.getStats();
+      assert.strictEqual(stats.misses, 1);
+      assert.strictEqual(stats.hits, 0);
+    });
+
+    it('should calculate hit rate correctly with hits and misses', async () => {
+      await cache.flush();
+      await cache.recreate(); // Reset stats by recreating the database
+      await cache.set('hit_key', 'test_tool', { query: 'test' }, { result: 'data' }, 3600);
+      await cache.get('hit_key');
+      await cache.get('hit_key');
+      await cache.get('miss_key');
+      await cache.get('another_miss_key');
+      const stats = await cache.getStats();
+      assert.strictEqual(stats.hits, 2);
+      assert.strictEqual(stats.misses, 2);
+      assert.strictEqual(stats.hitRate, 0.5);
+    });
+
+    it('should return zero misses when stats row does not exist', async () => {
+      await cache.flush();
+      // Create a new cache instance to test stats initialization
+      const freshCache = new CacheStore({ path: ':memory:', maxSizeBytes: 1000, defaultTtlSeconds: 3600 });
+      const stats = await freshCache.getStats();
+      assert.strictEqual(stats.misses, 0);
+      freshCache.close();
+    });
+  });
 });
