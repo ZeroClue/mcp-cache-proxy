@@ -6,20 +6,19 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { loadConfig, type ServerConfig } from './config.js';
+import { loadConfig } from './config.js';
 import { CacheStore } from './cache.js';
 import { ToolRouter } from './proxy.js';
+import { UpstreamManager } from './upstream.js';
 import { parseCliArgs, handleCliCommand } from './cli.js';
 
 async function main() {
   const { args, errors, warnings } = parseCliArgs(process.argv.slice(2));
 
-  // Report any warnings
   for (const warning of warnings) {
     console.warn(`Warning: ${warning}`);
   }
 
-  // Report any errors and exit
   if (errors.length > 0) {
     for (const error of errors) {
       console.error(`Error: ${error}`);
@@ -40,7 +39,17 @@ async function main() {
     process.exit(result.exitCode);
   }
 
-  // MCP Server Mode
+  const upstream = new UpstreamManager();
+
+  // Connect to all upstream servers
+  for (const [serverName, serverConfig] of Object.entries(config.servers)) {
+    try {
+      await upstream.connect(serverName, serverConfig);
+    } catch (err) {
+      console.error(`Failed to connect to ${serverName}:`, err);
+    }
+  }
+
   const server = new Server(
     { name: 'mcp-cache-proxy', version: '0.1.0' },
     { capabilities: { tools: {} } }
@@ -52,10 +61,7 @@ async function main() {
   router.registerTool({
     name: 'cache_stats',
     description: 'Get cache statistics',
-    inputSchema: {
-      type: 'object',
-      properties: {}
-    }
+    inputSchema: { type: 'object', properties: {} }
   });
 
   router.registerTool({
@@ -64,7 +70,7 @@ async function main() {
     inputSchema: {
       type: 'object',
       properties: {
-        tool: { type: 'string', description: 'Optional tool name to flush' }
+        tool: { type: 'string' }
       }
     }
   });
@@ -72,26 +78,19 @@ async function main() {
   router.registerTool({
     name: 'cache_new',
     description: 'Recreate the cache database',
-    inputSchema: {
-      type: 'object',
-      properties: {}
-    }
+    inputSchema: { type: 'object', properties: {} }
   });
 
-  // Register upstream tools (simplified - would connect to actual servers)
-  for (const [serverName, serverConfig] of Object.entries(config.servers)) {
-    const toolPrefix = serverName.replace(/-/g, '_');
-    router.registerTool({
-      name: `${toolPrefix}_search`,
-      description: `Search via ${serverName}`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string' }
-        },
-        required: ['query']
+  // Register upstream tools
+  for (const [serverName] of Object.entries(config.servers)) {
+    try {
+      const tools = await upstream.listTools(serverName);
+      for (const tool of tools) {
+        router.registerTool(tool);
       }
-    });
+    } catch (err) {
+      console.error(`Failed to list tools for ${serverName}:`, err);
+    }
   }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -99,9 +98,9 @@ async function main() {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    try {
-      const { name, arguments: args } = request.params;
+    const { name, arguments: args } = request.params;
 
+    try {
       // Handle cache management tools
       if (name === 'cache_stats') {
         const stats = await cache.getStats();
@@ -118,16 +117,18 @@ async function main() {
         return { content: [{ type: 'text', text: 'Cache recreated' }] };
       }
 
-      // Handle upstream tools (simplified - no actual upstream connection)
-      return await router.callTool(name, args, async () => {
-        // TODO: Connect to actual upstream MCP server
-        return { content: [{ type: 'text', text: 'Upstream not implemented' }] };
-      }) as { content: Array<{ type: string; text: string }> };
+      // Route to upstream
+      const serverName = router.findServerForTool(name);
+      if (serverName) {
+        return await router.callTool(name, args, async () => {
+          return await upstream.callTool(serverName, name, args);
+        }) as { content: unknown };
+      }
+
+      throw new Error(`Tool not found: ${name}`);
     } catch (error) {
-      // Return error response with isError flag
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       return {
-        content: [{ type: 'text', text: `Error: ${errorMessage}` }],
+        content: [{ type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
         isError: true
       };
     }
@@ -135,6 +136,11 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  process.on('SIGINT', () => {
+    upstream.close();
+    process.exit(0);
+  });
 }
 
 main().catch(err => {
