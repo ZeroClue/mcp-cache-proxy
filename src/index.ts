@@ -3,7 +3,6 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadConfig } from './config.js';
 import { CacheStore } from './cache.js';
-import { ToolRouter } from './proxy.js';
 import { parseCliArgs, handleCliCommand } from './cli.js';
 
 async function main() {
@@ -37,7 +36,8 @@ async function main() {
 
   // Start MCP server mode
   // TODO: Initialize MCP server with tools from upstream servers
-  console.error('MCP server mode not yet implemented');
+  console.error('Error: MCP server mode is not yet implemented.');
+  console.error('For now, use CLI commands: --stats, --flush, --new, --help');
   process.exit(1);
 }
 
