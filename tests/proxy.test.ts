@@ -73,4 +73,22 @@ describe('ToolRouter', () => {
     const server = router.findServerForTool('search_prime_web_search');
     assert.strictEqual(server, 'search-prime');
   });
+
+  it('should handle errors in upstream calls gracefully', async () => {
+    const mockCache = {
+      get: async () => null,
+      set: async () => {}
+    } as unknown as CacheStore;
+
+    const router = new ToolRouter(mockCache, {}, 'whitelist');
+    const upstream = async () => {
+      throw new Error('Upstream connection failed');
+    };
+
+    // The router should propagate the error
+    await assert.rejects(
+      async () => await router.callTool('test-tool', { query: 'test' }, upstream),
+      { message: 'Upstream connection failed' }
+    );
+  });
 });

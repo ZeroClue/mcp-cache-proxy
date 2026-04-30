@@ -99,29 +99,38 @@ async function main() {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+    try {
+      const { name, arguments: args } = request.params;
 
-    // Handle cache management tools
-    if (name === 'cache_stats') {
-      const stats = await cache.getStats();
-      return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
+      // Handle cache management tools
+      if (name === 'cache_stats') {
+        const stats = await cache.getStats();
+        return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
+      }
+
+      if (name === 'cache_flush') {
+        await cache.flush((args as { tool?: string })?.tool);
+        return { content: [{ type: 'text', text: 'Cache flushed' }] };
+      }
+
+      if (name === 'cache_new') {
+        await cache.recreate();
+        return { content: [{ type: 'text', text: 'Cache recreated' }] };
+      }
+
+      // Handle upstream tools (simplified - no actual upstream connection)
+      return await router.callTool(name, args, async () => {
+        // TODO: Connect to actual upstream MCP server
+        return { content: [{ type: 'text', text: 'Upstream not implemented' }] };
+      }) as { content: Array<{ type: string; text: string }> };
+    } catch (error) {
+      // Return error response with isError flag
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      return {
+        content: [{ type: 'text', text: `Error: ${errorMessage}` }],
+        isError: true
+      };
     }
-
-    if (name === 'cache_flush') {
-      await cache.flush((args as { tool?: string })?.tool);
-      return { content: [{ type: 'text', text: 'Cache flushed' }] };
-    }
-
-    if (name === 'cache_new') {
-      await cache.recreate();
-      return { content: [{ type: 'text', text: 'Cache recreated' }] };
-    }
-
-    // Handle upstream tools (simplified - no actual upstream connection)
-    return await router.callTool(name, args, async () => {
-      // TODO: Connect to actual upstream MCP server
-      return { content: [{ type: 'text', text: 'Upstream not implemented' }] };
-    }) as { content: Array<{ type: string; text: string }> };
   });
 
   const transport = new StdioServerTransport();
