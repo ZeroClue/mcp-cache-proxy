@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { ServerConfig } from './config.js';
 
@@ -23,9 +23,31 @@ export class UpstreamManager {
     let transport;
 
     if (config.url) {
-      // HTTP-based server
-      transport = new SSEClientTransport(
-        new URL(config.url)
+      // HTTP-based server (streamable HTTP transport)
+      const headers: Record<string, string> = {};
+      if (config.env) {
+        // Collect all environment variables as headers
+        for (const [key, value] of Object.entries(config.env)) {
+          // If value is empty string, try to get from process.env
+          const headerValue = value || process.env[key];
+          if (headerValue) {
+            // Convert env var names to header format (e.g., ANTHROPIC_AUTH_TOKEN -> Authorization)
+            if (key.includes('AUTH_TOKEN') || key.includes('API_KEY')) {
+              headers['Authorization'] = headerValue;
+            } else {
+              headers[key] = headerValue;
+            }
+          }
+        }
+      }
+
+      transport = new StreamableHTTPClientTransport(
+        new URL(config.url),
+        {
+          requestInit: {
+            headers
+          }
+        }
       );
     } else if (config.command) {
       // Stdio-based server
