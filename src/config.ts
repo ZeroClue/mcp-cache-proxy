@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { cwd } from 'node:process';
 
 export interface ServerConfig {
-  command: string;
-  args: string[];
+  command?: string;  // For stdio servers
+  args?: string[];   // For stdio servers
+  url?: string;      // For HTTP servers
   env?: Record<string, string>;
   cacheTtlSeconds?: number;
 }

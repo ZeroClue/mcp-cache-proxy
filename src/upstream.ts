@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { ServerConfig } from './config.js';
 
@@ -12,13 +13,6 @@ export class UpstreamManager {
       return this.clients.get(serverName)!;
     }
 
-    const childProcess = spawn(config.command, config.args, {
-      env: { ...process.env, ...config.env },
-      stdio: ['pipe', 'pipe', 'inherit']
-    });
-
-    this.processes.set(serverName, childProcess);
-
     const client = new Client({
       name: `mcp-cache-proxy-${serverName}`,
       version: '0.1.0'
@@ -26,10 +20,27 @@ export class UpstreamManager {
       capabilities: {}
     });
 
-    const transport = new StdioServerTransport(
-      childProcess.stdout,
-      childProcess.stdin
-    );
+    let transport;
+
+    if (config.url) {
+      // HTTP-based server
+      transport = new SSEClientTransport(
+        new URL(config.url)
+      );
+    } else if (config.command) {
+      // Stdio-based server
+      const childProcess = spawn(config.command, config.args || [], {
+        env: { ...process.env, ...config.env },
+        stdio: ['pipe', 'pipe', 'inherit']
+      });
+      this.processes.set(serverName, childProcess);
+      transport = new StdioServerTransport(
+        childProcess.stdout,
+        childProcess.stdin
+      );
+    } else {
+      throw new Error(`Server ${serverName} must have either 'url' or 'command'`);
+    }
 
     await client.connect(transport);
     this.clients.set(serverName, client);

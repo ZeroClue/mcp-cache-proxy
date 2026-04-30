@@ -14,6 +14,10 @@
       "command": "npx",
       "args": ["-y", "@zai-mcp/zread"],
       "cacheTtlSeconds": 3600
+    },
+    "http-server": {
+      "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
+      "cacheTtlSeconds": 86400
     }
   },
   "cache": {
