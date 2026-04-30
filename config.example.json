@@ -1,0 +1,26 @@
+{
+  "servers": {
+    "search-prime": {
+      "command": "npx",
+      "args": ["-y", "@zai-mcp/web-search-prime"],
+      "cacheTtlSeconds": 86400
+    },
+    "web-reader": {
+      "command": "npx",
+      "args": ["-y", "@zai-mcp/web-reader"],
+      "cacheTtlSeconds": 21600
+    },
+    "zread": {
+      "command": "npx",
+      "args": ["-y", "@zai-mcp/zread"],
+      "cacheTtlSeconds": 3600
+    }
+  },
+  "cache": {
+    "path": "~/.mcp-cache-proxy/cache.db",
+    "maxSizeBytes": 104857600,
+    "defaultTtlSeconds": 43200
+  },
+  "mode": "whitelist",
+  "extendGlobal": true
+}
