@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { loadConfig } from './config.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import { loadConfig, type ServerConfig } from './config.js';
 import { CacheStore } from './cache.js';
+import { ToolRouter } from './proxy.js';
 import { parseCliArgs, handleCliCommand } from './cli.js';
 
 async function main() {
@@ -34,11 +40,92 @@ async function main() {
     process.exit(result.exitCode);
   }
 
-  // Start MCP server mode
-  // TODO: Initialize MCP server with tools from upstream servers
-  console.error('Error: MCP server mode is not yet implemented.');
-  console.error('For now, use CLI commands: --stats, --flush, --new, --help');
-  process.exit(1);
+  // MCP Server Mode
+  const server = new Server(
+    { name: 'mcp-cache-proxy', version: '0.1.0' },
+    { capabilities: { tools: {} } }
+  );
+
+  const router = new ToolRouter(cache, config.servers, config.mode);
+
+  // Register cache management tools
+  router.registerTool({
+    name: 'cache_stats',
+    description: 'Get cache statistics',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  });
+
+  router.registerTool({
+    name: 'cache_flush',
+    description: 'Flush cache entries',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tool: { type: 'string', description: 'Optional tool name to flush' }
+      }
+    }
+  });
+
+  router.registerTool({
+    name: 'cache_new',
+    description: 'Recreate the cache database',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  });
+
+  // Register upstream tools (simplified - would connect to actual servers)
+  for (const [serverName, serverConfig] of Object.entries(config.servers)) {
+    const toolPrefix = serverName.replace(/-/g, '_');
+    router.registerTool({
+      name: `${toolPrefix}_search`,
+      description: `Search via ${serverName}`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' }
+        },
+        required: ['query']
+      }
+    });
+  }
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: router.getTools()
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+
+    // Handle cache management tools
+    if (name === 'cache_stats') {
+      const stats = await cache.getStats();
+      return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
+    }
+
+    if (name === 'cache_flush') {
+      await cache.flush((args as { tool?: string })?.tool);
+      return { content: [{ type: 'text', text: 'Cache flushed' }] };
+    }
+
+    if (name === 'cache_new') {
+      await cache.recreate();
+      return { content: [{ type: 'text', text: 'Cache recreated' }] };
+    }
+
+    // Handle upstream tools (simplified - no actual upstream connection)
+    return await router.callTool(name, args, async () => {
+      // TODO: Connect to actual upstream MCP server
+      return { content: [{ type: 'text', text: 'Upstream not implemented' }] };
+    }) as { content: Array<{ type: string; text: string }> };
+  });
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
 }
 
 main().catch(err => {
