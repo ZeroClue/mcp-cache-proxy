@@ -1,0 +1,28 @@
+{
+  "name": "mcp-cache-proxy",
+  "version": "0.1.0",
+  "description": "MCP proxy server with SQLite caching",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-cache-proxy": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc && node dist/index.js",
+    "test": "node --test tests/**/*.test.ts",
+    "lint": "echo 'no linter configured'"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.7.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
