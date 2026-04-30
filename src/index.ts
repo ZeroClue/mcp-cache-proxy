@@ -26,7 +26,8 @@ async function main() {
     process.exit(1);
   }
 
-  const config = await loadConfigWithProjectLookup(args.configPath);
+  const configPath = args.configPath || process.env.MCP_CACHE_CONFIG;
+  const config = await loadConfigWithProjectLookup(configPath);
   const cache = new CacheStore(config.cache);
 
   if (args.mode !== 'server') {
