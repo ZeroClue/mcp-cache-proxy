@@ -98,6 +98,17 @@ mcp-cache-proxy --new
 
 # Use custom config path
 mcp-cache-proxy --config /path/to/config.json
+
+### Environment Variable
+
+You can also specify a custom config path using the `MCP_CACHE_CONFIG` environment variable:
+
+```bash
+export MCP_CACHE_CONFIG=/path/to/config.json
+mcp-cache-proxy
+```
+
+The environment variable takes precedence over default lookup but is overridden by the `--config` flag.
 ```
 
 ## Cache Strategy

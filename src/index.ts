@@ -6,6 +6,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { loadConfigWithProjectLookup } from './config.js';
 import { CacheStore } from './cache.js';
 import { ToolRouter } from './proxy.js';
@@ -26,7 +28,10 @@ async function main() {
     process.exit(1);
   }
 
-  const configPath = args.configPath || process.env.MCP_CACHE_CONFIG;
+  let configPath = args.configPath || process.env.MCP_CACHE_CONFIG;
+  if (configPath?.startsWith('~/')) {
+    configPath = join(homedir(), configPath.slice(2));
+  }
   const config = await loadConfigWithProjectLookup(configPath);
   const cache = new CacheStore(config.cache);
 
