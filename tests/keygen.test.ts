@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { generateKey } from '../dist/keygen.js';
+import { generateKey } from '../src/keygen.ts';
 
 describe('generateKey', () => {
   it('should generate consistent keys for identical args', () => {
