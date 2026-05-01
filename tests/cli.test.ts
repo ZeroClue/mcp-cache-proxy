@@ -96,6 +96,41 @@ describe('parseCliArgs', () => {
     assert.strictEqual(result.warnings.length, 1);
     assert.match(result.warnings[0], /Unexpected argument.*unexpected/);
   });
+
+  it('should parse --export with file path', () => {
+    const result = parseCliArgs(['--export', '/path/to/export.json']);
+    assert.strictEqual(result.args.mode, 'export');
+    assert.strictEqual(result.args.exportPath, '/path/to/export.json');
+    assert.strictEqual(result.errors.length, 0);
+  });
+
+  it('should error when --export missing file path', () => {
+    const result = parseCliArgs(['--export']);
+    assert.strictEqual(result.args.mode, 'export');
+    assert.strictEqual(result.errors.length, 1);
+    assert.match(result.errors[0], /--export requires a file path/);
+  });
+
+  it('should parse --import with file path', () => {
+    const result = parseCliArgs(['--import', '/path/to/import.json']);
+    assert.strictEqual(result.args.mode, 'import');
+    assert.strictEqual(result.args.importPath, '/path/to/import.json');
+    assert.strictEqual(result.errors.length, 0);
+  });
+
+  it('should error when --import missing file path', () => {
+    const result = parseCliArgs(['--import']);
+    assert.strictEqual(result.args.mode, 'import');
+    assert.strictEqual(result.errors.length, 1);
+    assert.match(result.errors[0], /--import requires a file path/);
+  });
+
+  it('should include --export and --import in conflicting flags check', () => {
+    const result = parseCliArgs(['--export', 'file.json', '--import', 'file.json']);
+    assert.strictEqual(result.args.mode, 'import'); // Last one wins
+    assert.strictEqual(result.errors.length, 1);
+    assert.match(result.errors[0], /Conflicting flags/);
+  });
 });
 
 describe('validateConfigPath', () => {
@@ -224,6 +259,53 @@ describe('handleCliCommand', () => {
     const result = await handleCliCommand({ mode: 'stats' }, errorCache);
     assert.strictEqual(result.exitCode, 1);
     assert.match(result.output, /Error:/);
+  });
+
+  it('should handle export mode', async () => {
+    const exportPath = '/tmp/test-cli-export.json';
+    const result = await handleCliCommand({ mode: 'export', exportPath }, cache);
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.match(result.output, /Cache exported to:/);
+    assert.match(result.output, /test-cli-export\.json/);
+
+    // Clean up
+    const fs = await import('node:fs/promises');
+    try { await fs.unlink(exportPath); } catch {}
+  });
+
+  it('should handle import mode', async () => {
+    // First create an export file
+    const importPath = '/tmp/test-cli-import.json';
+    const fs = await import('node:fs/promises');
+
+    // Create test data
+    const testData = {
+      version: 1,
+      exportedAt: Math.floor(Date.now() / 1000),
+      entries: [
+        {
+          key: 'test_key',
+          tool: 'test_tool',
+          args: { data: 'test' },
+          result: { value: 'test_result' },
+          created_at: Math.floor(Date.now() / 1000) - 100,
+          ttl_seconds: 3600,
+          is_error: false
+        }
+      ]
+    };
+
+    await fs.writeFile(importPath, JSON.stringify(testData, null, 2), 'utf-8');
+
+    const result = await handleCliCommand({ mode: 'import', importPath }, cache);
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.match(result.output, /Cache import complete/);
+    assert.match(result.output, /Imported: 1/);
+
+    // Clean up
+    try { await fs.unlink(importPath); } catch {}
   });
 
   describe('warm mode', () => {

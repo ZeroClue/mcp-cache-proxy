@@ -1,6 +1,6 @@
 {
   "name": "mcp-cache-proxy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Caching proxy server for MCP (Model Context Protocol) tool calls. Reduces API quota usage with SQLite-based LRU caching.",
   "type": "module",
   "main": "dist/index.js",

@@ -18,11 +18,13 @@ export class ToolRouter {
   private mode: 'whitelist' | 'blacklist';
   private tools: Map<string, ToolDefinition>;
   private toolToServer: Map<string, string>;
+  private defaultNegativeCacheTtlSeconds: number;
 
-  constructor(cache: CacheStore, servers: Record<string, ServerConfig>, mode: 'whitelist' | 'blacklist') {
+  constructor(cache: CacheStore, servers: Record<string, ServerConfig>, mode: 'whitelist' | 'blacklist', defaultNegativeCacheTtlSeconds: number = 300) {
     this.cache = cache;
     this.servers = servers;
     this.mode = mode;
+    this.defaultNegativeCacheTtlSeconds = defaultNegativeCacheTtlSeconds;
     this.tools = new Map();
     this.toolToServer = new Map();
   }
@@ -72,20 +74,31 @@ export class ToolRouter {
     }
 
     const key = generateKey(toolName, args);
-    const cached = await this.cache.get(key);
 
-    if (cached !== null) {
-      return cached;
+    try {
+      const cached = await this.cache.get(key, toolName);
+
+      if (cached !== null) {
+        return cached;
+      }
+
+      const result = await upstream();
+
+      const serverName = this.findServerForTool(toolName);
+      if (serverName) {
+        const ttl = this.servers[serverName].cacheTtlSeconds || 43200;
+        await this.cache.set(key, toolName, args, result, ttl);
+      }
+
+      return result;
+    } catch (error) {
+      // Cache errors with negative cache TTL (per-server or default)
+      const serverName = this.findServerForTool(toolName);
+      if (serverName) {
+        const negativeTtl = this.servers[serverName].negativeCacheTtlSeconds || this.defaultNegativeCacheTtlSeconds;
+        await this.cache.set(key, toolName, args, error, negativeTtl, true);
+      }
+      throw error;
     }
-
-    const result = await upstream();
-
-    const serverName = this.findServerForTool(toolName);
-    if (serverName) {
-      const ttl = this.servers[serverName].cacheTtlSeconds || 43200;
-      await this.cache.set(key, toolName, args, result, ttl);
-    }
-
-    return result;
   }
 }

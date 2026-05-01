@@ -9,12 +9,15 @@ export interface ServerConfig {
   url?: string;      // For HTTP servers
   env?: Record<string, string>;
   cacheTtlSeconds?: number;
+  negativeCacheTtlSeconds?: number; // Per-server negative cache TTL for errors
 }
 
 export interface CacheConfig {
   path: string;
   maxSizeBytes: number;
+  maxEntrySizeBytes?: number;
   defaultTtlSeconds: number;
+  negativeCacheTtlSeconds?: number;
 }
 
 export interface Config {
@@ -27,7 +30,9 @@ export interface Config {
 const DEFAULT_CACHE_CONFIG: CacheConfig = {
   path: join(homedir(), '.mcp-cache-proxy/cache.db'),
   maxSizeBytes: 104857600,
-  defaultTtlSeconds: 43200
+  maxEntrySizeBytes: 10485760, // 10MB default per-entry limit
+  defaultTtlSeconds: 43200,
+  negativeCacheTtlSeconds: 300 // 5 minutes default for errors
 };
 
 const GLOBAL_CONFIG_PATH = join(homedir(), '.mcp-cache-proxy/config.json');

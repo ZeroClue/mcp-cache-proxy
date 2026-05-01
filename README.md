@@ -8,9 +8,12 @@ A caching proxy server for MCP (Model Context Protocol) tool calls. Reduces API 
 - Configurable TTL per server
 - SQLite-based cache with LRU size-based eviction
 - Supports both stdio and HTTP-based MCP servers
-- CLI for cache management (`--stats`, `--flush`, `--new`, `--warm`)
+- **Negative caching** for errors with configurable TTL
+- **Per-entry size limits** to prevent cache bloat
+- **Cache export/import** for backup and transfer
+- CLI for cache management (`--stats`, `--flush`, `--new`, `--warm`, `--export`, `--import`)
+- Per-tool cache statistics for monitoring and optimization
 - Project-specific config overrides with global inheritance
-- Cache warming for pre-loading frequently-used queries
 
 ## Installation
 
@@ -61,20 +64,24 @@ Create `~/.mcp-cache-proxy/config.json`:
     "search-prime": {
       "command": "npx",
       "args": ["-y", "@zai-mcp/web-search-prime"],
-      "cacheTtlSeconds": 86400
+      "cacheTtlSeconds": 86400,
+      "negativeCacheTtlSeconds": 300
     },
     "web-reader-http": {
       "url": "https://api.example.com/mcp/web-reader",
       "env": {
         "API_KEY": ""
       },
-      "cacheTtlSeconds": 21600
+      "cacheTtlSeconds": 21600,
+      "negativeCacheTtlSeconds": 600
     }
   },
   "cache": {
     "path": "~/.mcp-cache-proxy/cache.db",
     "maxSizeBytes": 104857600,
-    "defaultTtlSeconds": 43200
+    "maxEntrySizeBytes": 10485760,
+    "defaultTtlSeconds": 43200,
+    "negativeCacheTtlSeconds": 300
   },
   "mode": "whitelist"
 }
@@ -85,6 +92,16 @@ Create `~/.mcp-cache-proxy/config.json`:
 - **HTTP servers:** Use `url` for POST-based MCP endpoints
 
 **Environment variables:** Empty string values (`"API_KEY": ""`) tell the proxy to use `process.env[KEY]` instead. Useful for keeping secrets out of config files.
+
+**Server configuration options:**
+- `cacheTtlSeconds`: Time-to-live for successful responses (default: 43200 = 12 hours)
+- `negativeCacheTtlSeconds`: Time-to-live for error responses (default: 300 = 5 minutes)
+
+**Cache configuration options:**
+- `maxSizeBytes`: Maximum total cache size before eviction (default: 104857600 = 100MB)
+- `maxEntrySizeBytes`: Maximum size for individual cache entries (default: 10485760 = 10MB)
+- `defaultTtlSeconds`: Default TTL for servers without explicit config (default: 43200)
+- `negativeCacheTtlSeconds`: Default negative cache TTL for errors (default: 300)
 
 See `config.example.json` for all options.
 
@@ -112,7 +129,7 @@ The proxy runs as an MCP server and exposes all upstream tools plus cache manage
 ### Cache Management Tools
 
 The proxy adds these tools to any MCP client:
-- `cache_stats()` — Get cache statistics (cached, hits, hitRate, misses, sizeBytes)
+- `cache_stats()` — Get cache statistics including per-tool breakdown (cached, hits, hitRate, misses, sizeBytes, byTool)
 - `cache_flush(tool?)` — Flush cache entries (all or specific tool)
 - `cache_new()` — Recreate cache database
 
@@ -172,25 +189,31 @@ Any MCP-compliant client can connect to this proxy via stdio. Consult your clien
 
 ```bash
 # Show cache statistics
-node dist/index.js --stats
+mcp-cache-proxy --stats
 
 # Flush all cache
-node dist/index.js --flush
+mcp-cache-proxy --flush
 
 # Flush specific tool's cache
-node dist/index.js --flush search-prime
+mcp-cache-proxy --flush search-prime
 
 # Recreate cache database (handles corruption)
-node dist/index.js --new
+mcp-cache-proxy --new
 
 # Warm cache with pre-defined queries
-node dist/index.js --warm --queries queries.txt
+mcp-cache-proxy --warm --queries queries.txt
+
+# Export cache to JSON file
+mcp-cache-proxy --export cache-backup.json
+
+# Import cache from JSON file
+mcp-cache-proxy --import cache-backup.json
 
 # Use custom config path
-node dist/index.js --config /path/to/config.json
+mcp-cache-proxy --config /path/to/config.json
 
 # Show help
-node dist/index.js --help
+mcp-cache-proxy --help
 ```
 
 ### Environment Variable
@@ -222,6 +245,33 @@ node dist/index.js --warm --queries queries.txt
 ```
 
 See `queries.example.txt` for a complete example.
+
+### Cache Export/Import
+
+Export and import cache contents for backup or transfer between machines:
+
+```bash
+# Export cache to JSON file
+mcp-cache-proxy --export cache-backup.json
+
+# Import cache from JSON file
+mcp-cache-proxy --import cache-backup.json
+```
+
+**Export format:** JSON file with version info, timestamp, and entries array. Each entry includes key, tool, args, result, timestamps, and error status.
+
+**Import behavior:**
+- Skips entries that already exist (based on key)
+- Skips expired entries (TTL already passed)
+- Skips entries exceeding `maxEntrySizeBytes`
+- Adjusts TTL to preserve original expiration time
+- Updates per-tool statistics
+
+**Use cases:**
+- Backup cache before clearing or upgrading
+- Share cache between machines
+- Pre-seed cache with known good results
+- Debugging and analysis
 
 ## Cache Strategy
 

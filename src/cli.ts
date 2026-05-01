@@ -5,10 +5,12 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 
 export interface CliArgs {
-  mode: 'server' | 'stats' | 'flush' | 'new' | 'help' | 'warm';
+  mode: 'server' | 'stats' | 'flush' | 'new' | 'help' | 'warm' | 'export' | 'import';
   tool?: string;
   configPath?: string;
   queriesPath?: string;
+  exportPath?: string;
+  importPath?: string;
 }
 
 export interface CliResult {
@@ -25,6 +27,8 @@ Options:
   --flush [tool]       Flush cache for specific tool or all caches
   --new                Recreate cache database
   --warm --queries <file>  Warm cache with queries from file
+  --export <file>      Export cache to JSON file
+  --import <file>      Import cache from JSON file
   --config <path>      Path to configuration file
   --help               Display this help message
 
@@ -34,6 +38,8 @@ Examples:
   mcp-cache-proxy --flush search-prime
   mcp-cache-proxy --new
   mcp-cache-proxy --warm --queries queries.txt
+  mcp-cache-proxy --export cache-backup.json
+  mcp-cache-proxy --import cache-backup.json
   mcp-cache-proxy --config /path/to/config.json
 `;
 
@@ -74,8 +80,20 @@ export function parseCliArgs(args: string[]): ParseResult {
       case '--queries':
         if (i + 1 < args.length) {
           result.queriesPath = args[++i];
-        } else {
-          errors.push('--queries requires a file path');
+        }
+        break;
+      case '--export':
+        modeFlags.add('export');
+        result.mode = 'export';
+        if (i + 1 < args.length) {
+          result.exportPath = args[++i];
+        }
+        break;
+      case '--import':
+        modeFlags.add('import');
+        result.mode = 'import';
+        if (i + 1 < args.length) {
+          result.importPath = args[++i];
         }
         break;
       case '--config':
@@ -100,12 +118,22 @@ export function parseCliArgs(args: string[]): ParseResult {
   // Check for conflicting mode flags
   if (modeFlags.size > 1) {
     const flags = Array.from(modeFlags).join(', ');
-    errors.push(`Conflicting flags: ${flags}. Only one mode flag (--stats, --flush, --new, --warm) can be used at a time.`);
+    errors.push(`Conflicting flags: ${flags}. Only one mode flag (--stats, --flush, --new, --warm, --export, --import) can be used at a time.`);
   }
 
   // Validate warm mode has queries file
   if (result.mode === 'warm' && !result.queriesPath) {
     errors.push('--warm requires --queries <file>');
+  }
+
+  // Validate export mode has file path
+  if (result.mode === 'export' && !result.exportPath) {
+    errors.push('--export requires a file path');
+  }
+
+  // Validate import mode has file path
+  if (result.mode === 'import' && !result.importPath) {
+    errors.push('--import requires a file path');
   }
 
   return { args: result, errors, warnings };
@@ -160,6 +188,32 @@ export async function handleCliCommand(
           };
         }
         return await warmCache(args.queriesPath, cache, upstream, router);
+      }
+      case 'export': {
+        if (!args.exportPath) {
+          return {
+            output: 'Error: --export requires a file path',
+            exitCode: 1
+          };
+        }
+        await cache.exportCache(args.exportPath);
+        return {
+          output: `Cache exported to: ${args.exportPath}`,
+          exitCode: 0
+        };
+      }
+      case 'import': {
+        if (!args.importPath) {
+          return {
+            output: 'Error: --import requires a file path',
+            exitCode: 1
+          };
+        }
+        const result = await cache.importCache(args.importPath);
+        return {
+          output: `Cache import complete:\n  Imported: ${result.imported}\n  Skipped: ${result.skipped}`,
+          exitCode: 0
+        };
       }
       default:
         return {
