@@ -17,16 +17,21 @@ export class ToolRouter {
   private servers: Record<string, ServerConfig>;
   private mode: 'whitelist' | 'blacklist';
   private tools: Map<string, ToolDefinition>;
+  private toolToServer: Map<string, string>;
 
   constructor(cache: CacheStore, servers: Record<string, ServerConfig>, mode: 'whitelist' | 'blacklist') {
     this.cache = cache;
     this.servers = servers;
     this.mode = mode;
     this.tools = new Map();
+    this.toolToServer = new Map();
   }
 
-  registerTool(tool: ToolDefinition): void {
+  registerTool(tool: ToolDefinition, serverName?: string): void {
     this.tools.set(tool.name, tool);
+    if (serverName) {
+      this.toolToServer.set(tool.name, serverName);
+    }
   }
 
   getTools(): ToolDefinition[] {
@@ -34,7 +39,12 @@ export class ToolRouter {
   }
 
   findServerForTool(toolName: string): string | null {
-    for (const [serverName, config] of Object.entries(this.servers)) {
+    // Exact match from registration (most reliable)
+    const registered = this.toolToServer.get(toolName);
+    if (registered) return registered;
+
+    // Fallback: prefix match for cache management tools
+    for (const serverName of Object.keys(this.servers)) {
       if (toolName.startsWith(serverName.replace(/-/g, '_'))) {
         return serverName;
       }

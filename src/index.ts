@@ -88,7 +88,7 @@ async function main() {
     try {
       const tools = await upstream.listTools(serverName);
       for (const tool of tools) {
-        router.registerTool(tool);
+        router.registerTool(tool, serverName);
       }
     } catch (err) {
       console.error(`Failed to list tools for ${serverName}:`, err);

@@ -62,11 +62,12 @@ npm test -- --watch         # Watch mode
 ### Core Components
 
 - **src/index.ts**: Entry point, stdio transport, server startup
+- **src/upstream.ts**: Manages upstream MCP connections (stdio & HTTP), supports both StdioServerTransport and StreamableHTTPClientTransport
 - **src/proxy.ts**: Tool routing to upstream MCP servers, wraps cache layer
 - **src/cache.ts**: SQLite operations (get/set/flush/stats), TTL eviction, LRU
 - **src/keygen.ts**: Cache key generation (SHA-256, canonicalized args)
-- **src/config.ts**: Config loading from ~/.mcp-cache-proxy/config.json
-- **src/cli.ts**: CLI flag parsing (--stats, --flush, --warm, --config)
+- **src/config.ts**: Config loading with global/project lookup and merge
+- **src/cli.ts**: CLI flag parsing (--stats, --flush, --new, --config, --help)
 
 ### Cache Strategy
 
@@ -78,7 +79,30 @@ npm test -- --watch         # Watch mode
 
 ### Configuration Location
 
-`~/.mcp-cache-proxy/config.json` — contains upstream server definitions (command, args, cacheTtlSeconds), cache settings (path, maxSizeBytes, defaultTtlSeconds), and mode (whitelist/blacklist).
+- **Global config**: `~/.mcp-cache-proxy/config.json` — contains upstream server definitions
+- **Project config**: `.mcp-cache-proxy.json` (optional) — overrides global settings with `extendGlobal: true`
+- **Env var**: `MCP_CACHE_CONFIG` — custom config path (overrides defaults, overridden by --config flag)
+
+### Server Configuration
+
+**Stdio-based servers** (child processes):
+```json
+{
+  "command": "npx",
+  "args": ["-y", "@package/name"],
+  "env": { "API_KEY": "" }
+}
+```
+
+**HTTP-based servers** (POST endpoints):
+```json
+{
+  "url": "https://api.example.com/mcp/endpoint",
+  "env": { "AUTH_TOKEN": "" }
+}
+```
+
+**Note:** Empty string in `env` means "use `process.env[key]`" — for HTTP servers, Z.ai uses `AUTH_TOKEN` header (not `Authorization`).
 
 ### Key Design Constraints
 
