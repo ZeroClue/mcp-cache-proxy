@@ -110,3 +110,11 @@ npm test -- --watch         # Watch mode
 - Synchronous SQLite (`better-sqlite3`) for simplicity — no async complexity in cache layer.
 - Single stdio connection to Claude Code — the proxy multiplexes all upstream tools under one server.
 - Cache is shared across Claude Code sessions via SQLite file.
+
+### Tool Name Routing
+
+Tools are matched to upstream servers by prefix: `web_search_prime_*` → `web-search-prime` server. The proxy strips dashes from server names when matching (e.g., `web-search-prime` matches `web_search_prime`).
+
+### Implementation Notes
+
+- **LRU eviction**: Not implemented — listed as optional enhancement in spec. Cache only expires by TTL.
