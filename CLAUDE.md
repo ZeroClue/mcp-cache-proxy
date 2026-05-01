@@ -4,21 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MCP Cache Proxy is a TypeScript/Node.js proxy server that caches MCP (Model Context Protocol) tool calls to reduce API quota usage. The proxy implements the MCP server protocol over stdio and sits between Claude Code and upstream MCP servers (search-prime, web-reader, zread), caching results in SQLite.
+MCP Cache Proxy is a TypeScript/Node.js proxy server that caches MCP (Model Context Protocol) tool calls to reduce API quota usage. The proxy implements the MCP server protocol over stdio and sits between MCP clients (Claude Code, Cursor, Copilot, etc.) and upstream MCP servers (search-prime, web-reader, zread), caching results in SQLite.
 
 ### Architecture
 
 ```
-Claude Code (MCP client)
+MCP Client (Claude Code, Cursor, Copilot, etc.)
        ↕ stdio
 MCP Cache Proxy
-       ↕ stdio (per upstream server)
+       ↕ stdio/HTTP (per upstream server)
 Real MCP Servers (search-prime, web-reader, zread, etc.)
        ↕
   SQLite cache (~/.mcp-cache-proxy/cache.db)
 ```
 
-The proxy exposes a single MCP server connection to Claude Code that advertises the union of all cached servers' tools. When a tool is called, the proxy generates a cache key (SHA-256 of tool name + canonicalized arguments), checks SQLite, and returns cached results if fresh. Otherwise, it proxies to the upstream server and caches the response.
+The proxy exposes a single MCP server connection that advertises the union of all cached servers' tools. When a tool is called, the proxy generates a cache key (SHA-256 of tool name + canonicalized arguments), checks SQLite, and returns cached results if fresh. Otherwise, it proxies to the upstream server and caches the response.
 
 ## Commands
 
@@ -117,4 +117,4 @@ Tools are matched to upstream servers by prefix: `web_search_prime_*` → `web-s
 
 ### Implementation Notes
 
-- **LRU eviction**: Not implemented — listed as optional enhancement in spec. Cache only expires by TTL.
+- **LRU eviction**: Implemented — cache tracks entry sizes and evicts least recently used entries (lowest `(hits, created_at)` tuple) when `maxSizeBytes` is exceeded. Eviction targets 90% of max size to avoid frequent evictions.

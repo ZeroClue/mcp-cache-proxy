@@ -1,18 +1,49 @@
 {
   "name": "mcp-cache-proxy",
   "version": "0.1.0",
-  "description": "MCP proxy server with SQLite caching",
+  "description": "Caching proxy server for MCP (Model Context Protocol) tool calls. Reduces API quota usage with SQLite-based LRU caching.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mcp-cache-proxy": "dist/index.js"
+    "mcp-cache-proxy": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc && node dist/index.js",
     "test": "node --test tests/**/*.test.ts",
-    "lint": "echo 'no linter configured'"
+    "lint": "echo 'no linter configured'",
+    "prepublishOnly": "npm run build && npm test",
+    "prepack": "npm run build"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "CLAUDE.md",
+    "config.example.json",
+    "queries.example.txt"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "cache",
+    "proxy",
+    "sqlite",
+    "lru",
+    "api",
+    "rate-limiting",
+    "claude",
+    "anthropic"
+  ],
+  "author": "ZeroClue <thezeroclue@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZeroClue/mcp-cache-proxy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZeroClue/mcp-cache-proxy/issues"
+  },
+  "homepage": "https://github.com/ZeroClue/mcp-cache-proxy#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "better-sqlite3": "^11.7.0"

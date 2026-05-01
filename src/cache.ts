@@ -11,6 +11,7 @@ interface CacheEntry {
   created_at: number;
   hits: number;
   ttl_seconds: number;
+  size_bytes: number;
 }
 
 interface CacheStats {
@@ -41,7 +42,8 @@ export class CacheStore {
         result TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         hits INTEGER DEFAULT 0,
-        ttl_seconds INTEGER NOT NULL
+        ttl_seconds INTEGER NOT NULL,
+        size_bytes INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_cache_tool ON cache(tool);
       CREATE INDEX IF NOT EXISTS idx_cache_created ON cache(created_at);
@@ -54,6 +56,22 @@ export class CacheStore {
 
     // Initialize stats row using INSERT OR IGNORE
     this.db.prepare('INSERT OR IGNORE INTO stats (id, misses) VALUES (1, 0)').run();
+
+    // Migration: Add size_bytes column if it doesn't exist (for existing databases)
+    try {
+      const columns = this.db.prepare("PRAGMA table_info(cache)").all() as Array<{ name: string }>;
+      const hasSizeBytes = columns.some(col => col.name === 'size_bytes');
+      if (!hasSizeBytes) {
+        this.db.exec('ALTER TABLE cache ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0');
+        // Recalculate sizes for existing entries
+        this.db.prepare(`
+          UPDATE cache SET size_bytes = LENGTH(args) + LENGTH(result)
+        `).run();
+      }
+    } catch (error) {
+      // Column might already exist or other schema issue
+      console.warn('Schema migration check failed:', error);
+    }
   }
 
   async get(key: string): Promise<unknown | null> {
@@ -79,11 +97,57 @@ export class CacheStore {
 
   async set(key: string, tool: string, args: unknown, result: unknown, ttlSeconds: number): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
+    const argsJson = JSON.stringify(args);
+    const resultJson = JSON.stringify(result);
+    const entrySize = Buffer.byteLength(argsJson, 'utf8') + Buffer.byteLength(resultJson, 'utf8');
+
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO cache (key, tool, args, result, created_at, ttl_seconds)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO cache (key, tool, args, result, created_at, ttl_seconds, size_bytes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(key, tool, JSON.stringify(args), JSON.stringify(result), now, ttlSeconds);
+    stmt.run(key, tool, argsJson, resultJson, now, ttlSeconds, entrySize);
+
+    // Check if cache size exceeds maximum and evict if necessary
+    await this.evictIfNeeded();
+  }
+
+  private async evictIfNeeded(): Promise<void> {
+    // Calculate current total cache size
+    const sizeRow = this.db.prepare('SELECT SUM(size_bytes) as total FROM cache').get() as { total: number | null };
+    const currentSize = sizeRow?.total ?? 0;
+
+    if (currentSize <= this.config.maxSizeBytes) {
+      return; // No eviction needed
+    }
+
+    // Delete entries with lowest (hits, created_at) tuple until under limit
+    const targetSize = this.config.maxSizeBytes * 0.9; // Evict to 90% of max to avoid frequent evictions
+    let remainingSize = currentSize;
+
+    // Delete entries in batches until we're under the target size
+    while (remainingSize > targetSize) {
+      // Get the size of entries we're about to delete
+      const candidateStmt = this.db.prepare(`
+        SELECT key, size_bytes FROM cache
+        ORDER BY hits ASC, created_at ASC
+        LIMIT 100
+      `);
+      const candidates = candidateStmt.all() as Array<{ key: string; size_bytes: number }>;
+
+      if (candidates.length === 0) {
+        break; // No more entries to delete
+      }
+
+      const keysToDelete = candidates.map(c => c.key);
+      const sizeToDelete = candidates.reduce((sum, c) => sum + c.size_bytes, 0);
+
+      // Delete the batch
+      this.db.prepare(`
+        DELETE FROM cache WHERE key IN (${keysToDelete.map(() => '?').join(',')})
+      `).run(...keysToDelete);
+
+      remainingSize -= sizeToDelete;
+    }
   }
 
   async flush(tool?: string): Promise<void> {
@@ -117,18 +181,13 @@ export class CacheStore {
     const totalRow = this.db.prepare('SELECT COUNT(*) as count FROM cache').get() as { count: number };
     const hitsRow = this.db.prepare('SELECT SUM(hits) as total FROM cache').get() as { total: number | null };
     const missesRow = this.db.prepare('SELECT misses FROM stats WHERE id = 1').get() as { misses: number } | undefined;
+    const sizeRow = this.db.prepare('SELECT SUM(size_bytes) as total FROM cache').get() as { total: number | null };
 
     const cached = totalRow.count;
     const hits = hitsRow.total || 0;
     const misses = missesRow?.misses ?? 0;
     const hitRate = (hits + misses) > 0 ? hits / (hits + misses) : 0;
-
-    // Calculate approximate database size
-    // For in-memory databases, we return 0 as there's no file size to measure
-    // For file-based databases, we could check file size but better-sqlite3 doesn't
-    // provide a direct API. This would require fs.stat() which adds complexity.
-    // Returning 0 is acceptable as the cache layer focuses on hit/miss metrics.
-    const sizeBytes = 0;
+    const sizeBytes = sizeRow?.total ?? 0;
 
     return { cached, hits, hitRate, misses, sizeBytes };
   }

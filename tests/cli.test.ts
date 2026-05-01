@@ -49,6 +49,20 @@ describe('parseCliArgs', () => {
     assert.strictEqual(result.errors.length, 0);
   });
 
+  it('should parse --warm', () => {
+    const result = parseCliArgs(['--warm', '--queries', 'queries.txt']);
+    assert.strictEqual(result.args.mode, 'warm');
+    assert.strictEqual(result.args.queriesPath, 'queries.txt');
+    assert.strictEqual(result.errors.length, 0);
+  });
+
+  it('should require --queries when using --warm', () => {
+    const result = parseCliArgs(['--warm']);
+    assert.strictEqual(result.args.mode, 'warm');
+    assert.strictEqual(result.errors.length, 1);
+    assert.match(result.errors[0], /--warm requires --queries/);
+  });
+
   it('should detect conflicting mode flags', () => {
     const result = parseCliArgs(['--stats', '--flush']);
     assert.strictEqual(result.args.mode, 'flush'); // Last one wins
@@ -122,6 +136,8 @@ describe('handleCliCommand', () => {
     assert.match(result.output, /--stats/);
     assert.match(result.output, /--flush/);
     assert.match(result.output, /--new/);
+    assert.match(result.output, /--warm/);
+    assert.match(result.output, /--queries/);
     assert.match(result.output, /--config/);
     assert.match(result.output, /--help/);
     assert.match(result.output, /Examples:/);
@@ -208,5 +224,37 @@ describe('handleCliCommand', () => {
     const result = await handleCliCommand({ mode: 'stats' }, errorCache);
     assert.strictEqual(result.exitCode, 1);
     assert.match(result.output, /Error:/);
+  });
+
+  describe('warm mode', () => {
+    it('should require --queries for warm mode', async () => {
+      const result = await handleCliCommand({ mode: 'warm' }, cache);
+      assert.strictEqual(result.exitCode, 1);
+      assert.match(result.output, /--queries file path is required/);
+    });
+
+    it('should return error if upstream and router are not provided', async () => {
+      const result = await handleCliCommand(
+        { mode: 'warm', queriesPath: 'queries.txt' },
+        cache
+      );
+      assert.strictEqual(result.exitCode, 1);
+      assert.match(result.output, /internal error/);
+    });
+
+    it('should handle missing queries file', async () => {
+      // Mock upstream and router
+      const mockUpstream = {} as any;
+      const mockRouter = {} as any;
+
+      const result = await handleCliCommand(
+        { mode: 'warm', queriesPath: '/nonexistent/queries.txt' },
+        cache,
+        mockUpstream,
+        mockRouter
+      );
+      assert.strictEqual(result.exitCode, 1);
+      assert.match(result.output, /Error reading queries file/);
+    });
   });
 });

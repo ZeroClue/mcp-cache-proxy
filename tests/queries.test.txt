@@ -1,0 +1,3 @@
+{"tool": "cache_stats", "args": {}}
+{"tool": "test_tool", "args": {"query": "test"}}
+# This is a comment - should be ignored

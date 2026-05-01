@@ -35,12 +35,47 @@ async function main() {
   const config = await loadConfigWithProjectLookup(configPath);
   const cache = new CacheStore(config.cache);
 
-  if (args.mode !== 'server') {
+  // Handle CLI modes that don't need upstream/router
+  if (['help', 'stats', 'flush', 'new'].includes(args.mode)) {
     const result = await handleCliCommand(args, cache);
     console.log(result.output);
     process.exit(result.exitCode);
   }
 
+  // Handle warm mode - needs upstream and router
+  if (args.mode === 'warm') {
+    const upstream = new UpstreamManager();
+
+    // Connect to all upstream servers
+    for (const [serverName, serverConfig] of Object.entries(config.servers)) {
+      try {
+        await upstream.connect(serverName, serverConfig);
+      } catch (err) {
+        console.error(`Failed to connect to ${serverName}:`, err);
+      }
+    }
+
+    const router = new ToolRouter(cache, config.servers, config.mode);
+
+    // Register upstream tools
+    for (const [serverName] of Object.entries(config.servers)) {
+      try {
+        const tools = await upstream.listTools(serverName);
+        for (const tool of tools) {
+          router.registerTool(tool, serverName);
+        }
+      } catch (err) {
+        console.error(`Failed to list tools for ${serverName}:`, err);
+      }
+    }
+
+    const result = await handleCliCommand(args, cache, upstream, router);
+    console.log(result.output);
+    upstream.close();
+    process.exit(result.exitCode);
+  }
+
+  // Server mode
   const upstream = new UpstreamManager();
 
   // Connect to all upstream servers

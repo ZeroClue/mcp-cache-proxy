@@ -1,0 +1,7 @@
+# Sample queries file for cache warming
+# Lines starting with # are comments and will be ignored
+# Each line should be a valid JSON object with "tool" and "args" keys
+
+{"tool": "web_search_prime", "args": {"search_query": "typescript best practices"}}
+{"tool": "web-reader", "args": {"url": "https://example.com"}}
+{"tool": "mcp__mcp-cache-proxy__analyze_image", "args": {"imageSource": "https://example.com/image.jpg", "prompt": "Describe this image"}}

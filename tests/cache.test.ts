@@ -1,6 +1,5 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert';
-import { unlinkSync, existsSync } from 'node:fs';
 import { CacheStore } from '../src/cache.ts';
 
 const TEST_DB = ':memory:';
@@ -105,6 +104,75 @@ describe('CacheStore', () => {
       const freshCache = new CacheStore({ path: ':memory:', maxSizeBytes: 1000, defaultTtlSeconds: 3600 });
       const stats = await freshCache.getStats();
       assert.strictEqual(stats.misses, 0);
+      freshCache.close();
+    });
+  });
+
+  describe('LRU eviction', () => {
+    it('should calculate sizeBytes correctly in stats', async () => {
+      const freshCache = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'value' }, 3600);
+      const stats = await freshCache.getStats();
+      assert.strictEqual(stats.sizeBytes > 0, true);
+      assert.strictEqual(stats.cached, 1);
+      freshCache.close();
+    });
+
+    it('should evict entries when cache size exceeds maxSizeBytes', async () => {
+      const freshCache = new CacheStore({ path: ':memory:', maxSizeBytes: 100, defaultTtlSeconds: 3600 });
+      // Add entries that will exceed the max size
+      await freshCache.set('key1', 'tool1', { data: 'first' }, { result: 'value1' }, 3600);
+      await freshCache.set('key2', 'tool2', { data: 'second' }, { result: 'value2' }, 3600);
+      await freshCache.set('key3', 'tool3', { data: 'third' }, { result: 'value3' }, 3600);
+
+      const stats = await freshCache.getStats();
+      // Cache should be under max size after eviction
+      assert.strictEqual(stats.sizeBytes <= freshCache['config'].maxSizeBytes, true);
+      // Some entries should have been evicted
+      assert.ok(stats.cached < 3);
+      freshCache.close();
+    });
+
+    it('should evict least recently used entries first', async () => {
+      const freshCache = new CacheStore({ path: ':memory:', maxSizeBytes: 200, defaultTtlSeconds: 3600 });
+
+      // Create entries with significantly different access patterns
+      await freshCache.set('key_least_used', 'tool', { data: 'a' }, { result: 'result_a' }, 3600); // Will stay at 0 hits
+      await freshCache.set('key_most_used', 'tool', { data: 'b' }, { result: 'result_b' }, 3600);   // Will get many hits
+      await freshCache.set('key_medium_used', 'tool', { data: 'c' }, { result: 'result_c' }, 3600); // Will get some hits
+
+      // Create distinct access patterns
+      await freshCache.get('key_most_used');    // +1 hit
+      await freshCache.get('key_most_used');    // +1 hit
+      await freshCache.get('key_medium_used');  // +1 hit
+      // key_least_used: 0 hits
+
+      // Add a larger entry to force eviction
+      await freshCache.set('key_trigger', 'tool', { data: 'd'.repeat(100) }, { result: 'large_result' }, 3600);
+
+      const stats = await freshCache.getStats();
+      assert.ok(stats.sizeBytes <= 200, 'Cache should be under max size');
+
+      // The least recently used entry should be evicted first
+      assert.strictEqual(
+        await freshCache.get('key_least_used'),
+        null,
+        'Entry with 0 hits should be evicted before entries with hits'
+      );
+
+      freshCache.close();
+    });
+
+    it('should not evict when cache is under max size', async () => {
+      const freshCache = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      await freshCache.set('key1', 'tool1', { data: 'small' }, { result: 'value' }, 3600);
+      await freshCache.set('key2', 'tool2', { data: 'small' }, { result: 'value' }, 3600);
+
+      const stats = await freshCache.getStats();
+      // All entries should remain
+      assert.strictEqual(stats.cached, 2);
+      assert.ok(stats.sizeBytes < 10000);
+
       freshCache.close();
     });
   });

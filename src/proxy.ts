@@ -64,7 +64,10 @@ export class ToolRouter {
   }
 
   async callTool(toolName: string, args: unknown, upstream: UpstreamCall): Promise<unknown> {
-    if (!this.isCacheable(toolName)) {
+    const cacheable = this.isCacheable(toolName);
+    const server = this.findServerForTool(toolName);
+    console.error(`[CACHE] tool=${toolName} cacheable=${cacheable} server=${server}`);
+    if (!cacheable) {
       return upstream();
     }
 
