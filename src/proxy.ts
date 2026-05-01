@@ -19,6 +19,7 @@ export class ToolRouter {
   private tools: Map<string, ToolDefinition>;
   private toolToServer: Map<string, string>;
   private defaultNegativeCacheTtlSeconds: number;
+  private inflightRefreshes: Set<string>;
 
   constructor(cache: CacheStore, servers: Record<string, ServerConfig>, mode: 'whitelist' | 'blacklist', defaultNegativeCacheTtlSeconds: number = 300) {
     this.cache = cache;
@@ -27,6 +28,7 @@ export class ToolRouter {
     this.defaultNegativeCacheTtlSeconds = defaultNegativeCacheTtlSeconds;
     this.tools = new Map();
     this.toolToServer = new Map();
+    this.inflightRefreshes = new Set();
   }
 
   registerTool(tool: ToolDefinition, serverName?: string): void {
@@ -38,6 +40,18 @@ export class ToolRouter {
 
   getTools(): ToolDefinition[] {
     return Array.from(this.tools.values());
+  }
+
+  getToolToServerMap(): Map<string, string> {
+    return new Map(this.toolToServer);
+  }
+
+  private resolveTtl(toolName: string, serverName: string | null): number {
+    if (serverName && (this.servers[serverName] as { adaptiveTtl?: boolean }).adaptiveTtl) {
+      const adaptiveTtl = this.cache.getAdaptiveTtl(toolName);
+      if (adaptiveTtl !== null) return adaptiveTtl;
+    }
+    return serverName ? (this.servers[serverName].cacheTtlSeconds || 43200) : 43200;
   }
 
   findServerForTool(toolName: string): string | null {
@@ -75,24 +89,33 @@ export class ToolRouter {
 
     const key = generateKey(toolName, args);
 
-    try {
-      const cached = await this.cache.get(key, toolName);
+    // Check cache first (separate from upstream error handling)
+    const cached = await this.cache.getWithStale(key, toolName);
 
-      if (cached !== null) {
-        return cached;
+    if (cached !== null) {
+      // Cached errors (fresh or stale) — re-throw without re-caching
+      if (cached.value instanceof Error) throw cached.value;
+      if (cached.stale) {
+        const serverName = this.findServerForTool(toolName);
+        const ttl = this.resolveTtl(toolName, serverName);
+        this.refreshInBackground(key, toolName, args, upstream, ttl).catch(() => {});
       }
+      return cached.value;
+    }
 
+    // Cache miss — call upstream and cache the result
+    try {
       const result = await upstream();
 
       const serverName = this.findServerForTool(toolName);
       if (serverName) {
-        const ttl = this.servers[serverName].cacheTtlSeconds || 43200;
+        const ttl = this.resolveTtl(toolName, serverName);
         await this.cache.set(key, toolName, args, result, ttl);
       }
 
       return result;
     } catch (error) {
-      // Cache errors with negative cache TTL (per-server or default)
+      // Only cache errors from upstream (not from cache hits above)
       const serverName = this.findServerForTool(toolName);
       if (serverName) {
         const negativeTtl = this.servers[serverName].negativeCacheTtlSeconds || this.defaultNegativeCacheTtlSeconds;
@@ -100,5 +123,17 @@ export class ToolRouter {
       }
       throw error;
     }
+  }
+
+  private refreshInBackground(key: string, toolName: string, args: unknown, upstream: UpstreamCall, ttl: number): Promise<void> {
+    if (this.inflightRefreshes.has(key)) return Promise.resolve();
+    this.inflightRefreshes.add(key);
+    return upstream().then(result => {
+      return this.cache.touch(key, toolName, args, result, ttl);
+    }).catch(err => {
+      console.error(`[CACHE] Background refresh failed for ${toolName}:`, err);
+    }).finally(() => {
+      this.inflightRefreshes.delete(key);
+    });
   }
 }

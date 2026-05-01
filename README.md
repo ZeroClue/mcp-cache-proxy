@@ -7,11 +7,15 @@ A caching proxy server for MCP (Model Context Protocol) tool calls. Reduces API 
 - Transparent caching of MCP tool calls
 - Configurable TTL per server
 - SQLite-based cache with LRU size-based eviction
+- **Stale-while-revalidate** — serve stale data immediately, refresh in background
+- **WAL mode** — concurrent read performance for multi-process access
+- **Cost savings counter** — tracks avoided API calls in stats
+- **Adaptive TTL tuning** — automatically adjusts TTLs based on eviction patterns (opt-in per server)
 - Supports both stdio and HTTP-based MCP servers
 - **Negative caching** for errors with configurable TTL
 - **Per-entry size limits** to prevent cache bloat
 - **Cache export/import** for backup and transfer
-- CLI for cache management (`--stats`, `--flush`, `--new`, `--warm`, `--export`, `--import`)
+- CLI for cache management (`--stats`, `--flush`, `--new`, `--warm`, `--export`, `--import`, `--tune-ttl`)
 - Per-tool cache statistics for monitoring and optimization
 - Project-specific config overrides with global inheritance
 
@@ -96,12 +100,15 @@ Create `~/.mcp-cache-proxy/config.json`:
 **Server configuration options:**
 - `cacheTtlSeconds`: Time-to-live for successful responses (default: 43200 = 12 hours)
 - `negativeCacheTtlSeconds`: Time-to-live for error responses (default: 300 = 5 minutes)
+- `adaptiveTtl`: Enable automatic TTL adjustment based on eviction patterns (default: false)
+- `cacheTtlRange`: Min/max bounds for adaptive TTL adjustments, e.g. `{ "min": 3600, "max": 86400 }`
 
 **Cache configuration options:**
 - `maxSizeBytes`: Maximum total cache size before eviction (default: 104857600 = 100MB)
 - `maxEntrySizeBytes`: Maximum size for individual cache entries (default: 10485760 = 10MB)
 - `defaultTtlSeconds`: Default TTL for servers without explicit config (default: 43200)
 - `negativeCacheTtlSeconds`: Default negative cache TTL for errors (default: 300)
+- `staleWhileRevalidateSeconds`: Grace period after TTL expiry to serve stale data while refreshing (default: 0 = disabled)
 
 See `config.example.json` for all options.
 
@@ -129,7 +136,7 @@ The proxy runs as an MCP server and exposes all upstream tools plus cache manage
 ### Cache Management Tools
 
 The proxy adds these tools to any MCP client:
-- `cache_stats()` — Get cache statistics including per-tool breakdown (cached, hits, hitRate, misses, sizeBytes, byTool)
+- `cache_stats()` — Get cache statistics including per-tool breakdown (cached, hits, hitRate, misses, sizeBytes, staleHits, savedCalls, byTool)
 - `cache_flush(tool?)` — Flush cache entries (all or specific tool)
 - `cache_new()` — Recreate cache database
 
@@ -209,6 +216,9 @@ mcp-cache-proxy --export cache-backup.json
 # Import cache from JSON file
 mcp-cache-proxy --import cache-backup.json
 
+# Show adaptive TTL diagnostic status
+mcp-cache-proxy --tune-ttl
+
 # Use custom config path
 mcp-cache-proxy --config /path/to/config.json
 
@@ -281,10 +291,13 @@ mcp-cache-proxy --import cache-backup.json
   - web-reader: 6 hours
   - zread: 1 hour
   - Other: 12 hours (defaultTtlSeconds)
+- **Stale-while-revalidate:** When enabled (`staleWhileRevalidateSeconds > 0`), expired entries are served immediately while fresh data is fetched in the background. The user never waits for a cache refresh.
 - **Eviction:** LRU when `maxSizeBytes` exceeded (default: 100MB)
   - Entries evicted by `(hits ASC, created_at ASC)` — least used/oldest first
   - Eviction targets 90% of max size to avoid frequent re-eviction
 - **Mode:** Whitelist by default — only cache explicitly configured tools
+- **WAL mode:** SQLite uses Write-Ahead Logging for concurrent read performance. `busy_timeout = 5000ms` handles lock contention gracefully.
+- **Adaptive TTL tuning:** Enable with `adaptiveTtl: true` per server. A background adaptor analyzes eviction statistics every 10 minutes — entries that expire without being accessed (premature evictions) signal the TTL is too long. The adaptor automatically decreases TTL when premature eviction rate is high (>60%) and increases it when most evicted entries had hits (<20%). Use `--tune-ttl` to view diagnostic status.
 
 ## Development
 

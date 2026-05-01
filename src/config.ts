@@ -10,6 +10,8 @@ export interface ServerConfig {
   env?: Record<string, string>;
   cacheTtlSeconds?: number;
   negativeCacheTtlSeconds?: number; // Per-server negative cache TTL for errors
+  adaptiveTtl?: boolean;                        // Opt-in adaptive TTL tuning
+  cacheTtlRange?: { min: number; max: number };   // TTL bounds for adaptive tuning
 }
 
 export interface CacheConfig {
@@ -18,6 +20,7 @@ export interface CacheConfig {
   maxEntrySizeBytes?: number;
   defaultTtlSeconds: number;
   negativeCacheTtlSeconds?: number;
+  staleWhileRevalidateSeconds?: number;
 }
 
 export interface Config {
@@ -32,7 +35,8 @@ const DEFAULT_CACHE_CONFIG: CacheConfig = {
   maxSizeBytes: 104857600,
   maxEntrySizeBytes: 10485760, // 10MB default per-entry limit
   defaultTtlSeconds: 43200,
-  negativeCacheTtlSeconds: 300 // 5 minutes default for errors
+  negativeCacheTtlSeconds: 300, // 5 minutes default for errors
+  staleWhileRevalidateSeconds: 0 // disabled by default
 };
 
 const GLOBAL_CONFIG_PATH = join(homedir(), '.mcp-cache-proxy/config.json');

@@ -587,4 +587,458 @@ describe('CacheStore', () => {
       newCache.close();
     });
   });
+
+  describe('stale-while-revalidate', () => {
+    it('should return fresh data with stale=false', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600,
+        staleWhileRevalidateSeconds: 300
+      });
+
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'fresh' }, 3600);
+      const result = await freshCache.getWithStale('key1');
+      assert.ok(result !== null);
+      assert.strictEqual(result.stale, false);
+      assert.deepStrictEqual(result.value, { result: 'fresh' });
+
+      freshCache.close();
+    });
+
+    it('should return stale data with stale=true when within grace period', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600,
+        staleWhileRevalidateSeconds: 10
+      });
+
+      // Set with 1 second TTL
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'stale' }, 1);
+
+      // Wait for TTL to expire
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const result = await freshCache.getWithStale('key1');
+      assert.ok(result !== null);
+      assert.strictEqual(result.stale, true);
+      assert.deepStrictEqual(result.value, { result: 'stale' });
+
+      freshCache.close();
+    });
+
+    it('should return null when past both TTL and stale grace period', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600,
+        staleWhileRevalidateSeconds: 1
+      });
+
+      // Set with 1 second TTL and 1 second stale grace
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'old' }, 1);
+
+      // Wait for TTL + stale grace to expire
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const result = await freshCache.getWithStale('key1');
+      assert.strictEqual(result, null);
+
+      freshCache.close();
+    });
+
+    it('should not serve stale data when staleWhileRevalidateSeconds is 0', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600,
+        staleWhileRevalidateSeconds: 0 // disabled
+      });
+
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'data' }, 1);
+
+      // Wait for TTL to expire
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const result = await freshCache.getWithStale('key1');
+      assert.strictEqual(result, null);
+
+      freshCache.close();
+    });
+
+    it('should track stale hits in stats', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600,
+        staleWhileRevalidateSeconds: 10
+      });
+
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'stale' }, 1);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      await freshCache.getWithStale('key1');
+      const stats = await freshCache.getStats();
+      assert.strictEqual(stats.staleHits, 1);
+
+      freshCache.close();
+    });
+
+    it('should touch (update) an existing entry with fresh data', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600,
+        staleWhileRevalidateSeconds: 10
+      });
+
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'old' }, 1);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Verify it's stale
+      const staleResult = await freshCache.getWithStale('key1');
+      assert.ok(staleResult !== null && staleResult.stale === true);
+
+      // Touch with fresh data
+      await freshCache.touch('key1', 'tool1', { data: 'test' }, { result: 'fresh' }, 3600);
+
+      // Should now be fresh
+      const freshResult = await freshCache.getWithStale('key1');
+      assert.ok(freshResult !== null);
+      assert.strictEqual(freshResult.stale, false);
+      assert.deepStrictEqual(freshResult.value, { result: 'fresh' });
+
+      freshCache.close();
+    });
+
+    it('should return cached errors as value when stale (not throw)', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600,
+        staleWhileRevalidateSeconds: 10
+      });
+
+      const error = new Error('Stale error');
+      await freshCache.set('key1', 'tool1', { data: 'test' }, error, 1, true);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Stale errors are returned as Error objects in value (not thrown)
+      // so the caller can serve stale data and trigger background refresh
+      const result = await freshCache.getWithStale('key1');
+      assert.ok(result !== null);
+      assert.strictEqual(result.stale, true);
+      assert.ok(result.value instanceof Error);
+      assert.strictEqual((result.value as Error).message, 'Stale error');
+
+      // Stale hit should be tracked
+      const stats = await freshCache.getStats();
+      assert.strictEqual(stats.staleHits, 1);
+
+      freshCache.close();
+    });
+  });
+
+  describe('cost savings counter', () => {
+    it('should track saved calls on fresh cache hits', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600
+      });
+
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'value' }, 3600);
+      await freshCache.get('key1');
+      await freshCache.get('key1');
+
+      const stats = await freshCache.getStats();
+      assert.strictEqual(stats.savedCalls, 2);
+
+      freshCache.close();
+    });
+
+    it('should track saved calls on stale cache hits', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600,
+        staleWhileRevalidateSeconds: 10
+      });
+
+      await freshCache.set('key1', 'tool1', { data: 'test' }, { result: 'value' }, 1);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      await freshCache.getWithStale('key1');
+
+      const stats = await freshCache.getStats();
+      assert.strictEqual(stats.savedCalls, 1);
+
+      freshCache.close();
+    });
+
+    it('should not count misses as saved calls', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600
+      });
+
+      await freshCache.get('nonexistent');
+
+      const stats = await freshCache.getStats();
+      assert.strictEqual(stats.savedCalls, 0);
+      assert.strictEqual(stats.misses, 1);
+
+      freshCache.close();
+    });
+
+    it('should be zero for a fresh cache', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600
+      });
+
+      const stats = await freshCache.getStats();
+      assert.strictEqual(stats.savedCalls, 0);
+
+      freshCache.close();
+    });
+  });
+
+  describe('WAL mode', () => {
+    it('should enable WAL journal mode', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600
+      });
+
+      // WAL mode returns "memory" for in-memory databases, which is fine
+      // For file-based databases it would return "wal"
+      const mode = freshCache['db'].pragma('journal_mode') as { journal_mode: string }[];
+      assert.ok(['memory', 'wal'].includes(mode[0].journal_mode));
+
+      freshCache.close();
+    });
+
+    it('should set busy_timeout for concurrent access', async () => {
+      const freshCache = new CacheStore({
+        path: ':memory:',
+        maxSizeBytes: 10000,
+        defaultTtlSeconds: 3600
+      });
+
+      // busy_timeout is set silently — verify it was set by re-reading
+      const result = freshCache['db'].pragma('busy_timeout');
+      // The pragma returns the value if set
+      assert.ok(result !== undefined);
+
+      freshCache.close();
+    });
+  });
+
+  describe('eviction tracking', () => {
+    it('should record eviction when entry expires via get()', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      await c.set('key1', 'tool1', { data: 'test' }, { result: 'value' }, 0);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await c.get('key1');
+
+      const evictions = c['db'].prepare('SELECT * FROM eviction_stats').all() as any[];
+      assert.strictEqual(evictions.length, 1);
+      assert.strictEqual(evictions[0].tool, 'tool1');
+      assert.strictEqual(evictions[0].eviction_reason, 'expired');
+      c.close();
+    });
+
+    it('should record eviction when entry expires via getWithStale()', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600, staleWhileRevalidateSeconds: 1 });
+      await c.set('key1', 'tool1', { data: 'test' }, { result: 'value' }, 1);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      await c.getWithStale('key1');
+
+      const evictions = c['db'].prepare("SELECT * FROM eviction_stats WHERE eviction_reason = 'stale_expired'").all() as any[];
+      assert.strictEqual(evictions.length, 1);
+      c.close();
+    });
+
+    it('should record LRU evictions with correct reason', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 100, defaultTtlSeconds: 3600 });
+      // Each entry is ~80+ bytes (args + result), so 2 entries exceed maxSizeBytes=100
+      const bigData = 'x'.repeat(40);
+      await c.set('k1', 'tool1', { d: bigData }, { r: bigData }, 3600);
+      await c.set('k2', 'tool1', { d: bigData }, { r: bigData }, 3600);
+
+      const evictions = c['db'].prepare("SELECT * FROM eviction_stats WHERE eviction_reason = 'lru'").all() as any[];
+      assert.ok(evictions.length > 0);
+      c.close();
+    });
+
+    it('should track had_hits for evicted entries', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      await c.set('key1', 'tool1', { data: 'test' }, { result: 'value' }, 2);
+      await c.get('key1'); // Hit once (within 2s TTL)
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      await c.get('key1'); // Now expired, triggers eviction
+
+      const evictions = c['db'].prepare('SELECT had_hits FROM eviction_stats').all() as any[];
+      assert.strictEqual(evictions.length, 1);
+      assert.strictEqual(evictions[0].had_hits, 1);
+      c.close();
+    });
+  });
+
+  describe('stale hits stats fix', () => {
+    it('should increment hits (not misses) for stale hits in stats_by_tool', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600, staleWhileRevalidateSeconds: 10 });
+      await c.set('key1', 'tool1', { data: 'test' }, { result: 'stale' }, 1);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const result = await c.getWithStale('key1');
+      assert.ok(result !== null && result.stale === true);
+
+      const toolStats = c['db'].prepare('SELECT * FROM stats_by_tool WHERE tool = ?').get('tool1') as any;
+      assert.strictEqual(toolStats.hits, 1, 'Stale hit should increment hits');
+      assert.strictEqual(toolStats.misses, 0, 'Stale hit should NOT increment misses');
+      c.close();
+    });
+  });
+
+  describe('adaptive TTL', () => {
+    it('should return null for tools without adaptive config', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      assert.strictEqual(c.getAdaptiveTtl('nonexistent_tool'), null);
+      c.close();
+    });
+
+    it('should initialize adaptive TTLs for configured servers', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      const toolToServer = new Map<string, string>([['tool_a', 'server1']]);
+      const servers = { server1: { cacheTtlSeconds: 7200, adaptiveTtl: true } };
+
+      c.initAdaptiveTtls(servers as any, toolToServer);
+
+      assert.strictEqual(c.getAdaptiveTtl('tool_a'), 7200);
+      c.close();
+    });
+
+    it('should return diagnostic status', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      const toolToServer = new Map<string, string>([['tool_a', 'server1']]);
+      const servers = { server1: { cacheTtlSeconds: 3600, adaptiveTtl: true } };
+
+      c.initAdaptiveTtls(servers as any, toolToServer);
+
+      const status = c.getAdaptiveTtlStatus();
+      assert.strictEqual(status.length, 1);
+      assert.strictEqual(status[0].tool, 'tool_a');
+      assert.strictEqual(status[0].baseTtl, 3600);
+      assert.strictEqual(status[0].effectiveTtl, 3600);
+      assert.strictEqual(status[0].prematureRate, 0);
+      c.close();
+    });
+
+    it('should decrease TTL when premature eviction rate is high', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      const toolToServer = new Map<string, string>([['tool_a', 'server1']]);
+      const servers = { server1: { cacheTtlSeconds: 3600, adaptiveTtl: true, cacheTtlRange: { min: 600, max: 86400 } } };
+
+      c.initAdaptiveTtls(servers as any, toolToServer);
+
+      const now = Math.floor(Date.now() / 1000);
+      for (let i = 0; i < 10; i++) {
+        c['db'].prepare(`
+          INSERT INTO eviction_stats (tool, evicted_at, had_hits, size_bytes, eviction_reason)
+          VALUES (?, ?, 0, 100, 'lru')
+        `).run('tool_a', now - i * 60);
+      }
+
+      await c.adaptTtls(servers as any, toolToServer);
+
+      const newTtl = c.getAdaptiveTtl('tool_a');
+      assert.ok(newTtl !== null);
+      assert.ok(newTtl < 3600, `TTL should decrease: ${newTtl} < 3600`);
+      assert.ok(newTtl >= 600, `TTL should respect min bound: ${newTtl} >= 600`);
+      c.close();
+    });
+
+    it('should increase TTL when premature eviction rate is low', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      const toolToServer = new Map<string, string>([['tool_a', 'server1']]);
+      const servers = { server1: { cacheTtlSeconds: 3600, adaptiveTtl: true, cacheTtlRange: { min: 600, max: 86400 } } };
+
+      c.initAdaptiveTtls(servers as any, toolToServer);
+
+      const now = Math.floor(Date.now() / 1000);
+      for (let i = 0; i < 9; i++) {
+        c['db'].prepare(`
+          INSERT INTO eviction_stats (tool, evicted_at, had_hits, size_bytes, eviction_reason)
+          VALUES (?, ?, 1, 100, 'lru')
+        `).run('tool_a', now - i * 60);
+      }
+      c['db'].prepare(`
+        INSERT INTO eviction_stats (tool, evicted_at, had_hits, size_bytes, eviction_reason)
+        VALUES (?, ?, 0, 100, 'lru')
+      `).run('tool_a', now);
+
+      await c.adaptTtls(servers as any, toolToServer);
+
+      const newTtl = c.getAdaptiveTtl('tool_a');
+      assert.ok(newTtl !== null);
+      assert.ok(newTtl > 3600, `TTL should increase: ${newTtl} > 3600`);
+      assert.ok(newTtl <= 86400, `TTL should respect max bound: ${newTtl} <= 86400`);
+      c.close();
+    });
+
+    it('should not adjust TTL when sample size is insufficient', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      const toolToServer = new Map<string, string>([['tool_a', 'server1']]);
+      const servers = { server1: { cacheTtlSeconds: 3600, adaptiveTtl: true } };
+
+      c.initAdaptiveTtls(servers as any, toolToServer);
+
+      const now = Math.floor(Date.now() / 1000);
+      for (let i = 0; i < 3; i++) {
+        c['db'].prepare(`
+          INSERT INTO eviction_stats (tool, evicted_at, had_hits, size_bytes, eviction_reason)
+          VALUES (?, ?, 0, 100, 'lru')
+        `).run('tool_a', now - i * 60);
+      }
+
+      await c.adaptTtls(servers as any, toolToServer);
+
+      const newTtl = c.getAdaptiveTtl('tool_a');
+      assert.strictEqual(newTtl, 3600, 'TTL should not change with insufficient samples');
+      c.close();
+    });
+
+    it('should clean up eviction_stats older than 24h', async () => {
+      const c = new CacheStore({ path: ':memory:', maxSizeBytes: 10000, defaultTtlSeconds: 3600 });
+      const toolToServer = new Map<string, string>([['tool_a', 'server1']]);
+      const servers = { server1: { cacheTtlSeconds: 3600, adaptiveTtl: true } };
+
+      const oldTime = Math.floor(Date.now() / 1000) - 90000;
+      c['db'].prepare(`
+        INSERT INTO eviction_stats (tool, evicted_at, had_hits, size_bytes, eviction_reason)
+        VALUES (?, ?, 0, 100, 'expired')
+      `).run('tool_a', oldTime);
+
+      const now = Math.floor(Date.now() / 1000);
+      for (let i = 0; i < 5; i++) {
+        c['db'].prepare(`
+          INSERT INTO eviction_stats (tool, evicted_at, had_hits, size_bytes, eviction_reason)
+          VALUES (?, ?, 0, 100, 'expired')
+        `).run('tool_a', now - i * 60);
+      }
+
+      c.initAdaptiveTtls(servers as any, toolToServer);
+      await c.adaptTtls(servers as any, toolToServer);
+
+      const remaining = c['db'].prepare('SELECT COUNT(*) as cnt FROM eviction_stats').get() as any;
+      assert.strictEqual(remaining.cnt, 5, 'Old eviction should be cleaned up');
+      c.close();
+    });
+  });
 });

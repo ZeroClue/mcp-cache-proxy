@@ -5,7 +5,7 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 
 export interface CliArgs {
-  mode: 'server' | 'stats' | 'flush' | 'new' | 'help' | 'warm' | 'export' | 'import';
+  mode: 'server' | 'stats' | 'flush' | 'new' | 'help' | 'warm' | 'export' | 'import' | 'tune-ttl';
   tool?: string;
   configPath?: string;
   queriesPath?: string;
@@ -29,6 +29,7 @@ Options:
   --warm --queries <file>  Warm cache with queries from file
   --export <file>      Export cache to JSON file
   --import <file>      Import cache from JSON file
+  --tune-ttl           Show adaptive TTL status and eviction statistics
   --config <path>      Path to configuration file
   --help               Display this help message
 
@@ -40,6 +41,7 @@ Examples:
   mcp-cache-proxy --warm --queries queries.txt
   mcp-cache-proxy --export cache-backup.json
   mcp-cache-proxy --import cache-backup.json
+  mcp-cache-proxy --tune-ttl
   mcp-cache-proxy --config /path/to/config.json
 `;
 
@@ -96,6 +98,10 @@ export function parseCliArgs(args: string[]): ParseResult {
           result.importPath = args[++i];
         }
         break;
+      case '--tune-ttl':
+        modeFlags.add('tune-ttl');
+        result.mode = 'tune-ttl';
+        break;
       case '--config':
         if (i + 1 < args.length) {
           result.configPath = args[++i];
@@ -118,7 +124,7 @@ export function parseCliArgs(args: string[]): ParseResult {
   // Check for conflicting mode flags
   if (modeFlags.size > 1) {
     const flags = Array.from(modeFlags).join(', ');
-    errors.push(`Conflicting flags: ${flags}. Only one mode flag (--stats, --flush, --new, --warm, --export, --import) can be used at a time.`);
+    errors.push(`Conflicting flags: ${flags}. Only one mode flag (--stats, --flush, --new, --warm, --export, --import, --tune-ttl) can be used at a time.`);
   }
 
   // Validate warm mode has queries file
@@ -212,6 +218,35 @@ export async function handleCliCommand(
         const result = await cache.importCache(args.importPath);
         return {
           output: `Cache import complete:\n  Imported: ${result.imported}\n  Skipped: ${result.skipped}`,
+          exitCode: 0
+        };
+      }
+      case 'tune-ttl': {
+        const status = cache.getAdaptiveTtlStatus();
+        if (status.length === 0) {
+          return {
+            output: 'No adaptive TTLs configured. Set "adaptiveTtl: true" in your server config to enable.',
+            exitCode: 0
+          };
+        }
+        const formatTtl = (sec: number) => {
+          if (sec >= 86400) return `${(sec / 86400).toFixed(1)}d`;
+          if (sec >= 3600) return `${(sec / 3600).toFixed(1)}h`;
+          return `${sec}s`;
+        };
+        const lines = status.map(s => {
+          const arrow = s.effectiveTtl !== s.baseTtl ? '->' : '=';
+          const lastAdj = s.lastAdjustedAt > 0
+            ? `${Math.round((Date.now() / 1000 - s.lastAdjustedAt) / 60)}m ago`
+            : 'never';
+          return `  ${s.tool}: ${formatTtl(s.baseTtl)} ${arrow} ${formatTtl(s.effectiveTtl)}  ` +
+            `(premature: ${(s.prematureRate * 100).toFixed(0)}%, ` +
+            `evictions/h: ${s.evictionsLastHour}, ` +
+            `adjusted: ${s.adjustmentCount}x, last: ${lastAdj})`;
+        });
+        const adapted = status.filter(s => s.effectiveTtl !== s.baseTtl).length;
+        return {
+          output: `Adaptive TTL Status (${adapted}/${status.length} tools adjusted):\n${lines.join('\n')}`,
           exitCode: 0
         };
       }

@@ -339,4 +339,32 @@ describe('handleCliCommand', () => {
       assert.match(result.output, /Error reading queries file/);
     });
   });
+
+  describe('tune-ttl mode', () => {
+    it('should parse --tune-ttl', () => {
+      const result = parseCliArgs(['--tune-ttl']);
+      assert.strictEqual(result.args.mode, 'tune-ttl');
+      assert.strictEqual(result.errors.length, 0);
+    });
+
+    it('should show no-adaptive message when no adaptive TTLs configured', async () => {
+      await cache.flush();
+      const result = await handleCliCommand({ mode: 'tune-ttl' }, cache);
+      assert.strictEqual(result.exitCode, 0);
+      assert.match(result.output, /No adaptive TTLs configured/);
+    });
+
+    it('should show diagnostic status for tools with adaptive TTLs', async () => {
+      await cache.flush();
+      // Seed an adaptive TTL entry directly
+      const toolToServer = new Map<string, string>([['tool_a', 'server1']]);
+      const servers = { server1: { cacheTtlSeconds: 7200, adaptiveTtl: true } };
+      cache.initAdaptiveTtls(servers, toolToServer);
+
+      const result = await handleCliCommand({ mode: 'tune-ttl' }, cache);
+      assert.strictEqual(result.exitCode, 0);
+      assert.match(result.output, /Adaptive TTL Status/);
+      assert.match(result.output, /tool_a/);
+    });
+  });
 });

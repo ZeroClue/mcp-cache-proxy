@@ -36,7 +36,7 @@ async function main() {
   const cache = new CacheStore(config.cache);
 
   // Handle CLI modes that don't need upstream/router
-  if (['help', 'stats', 'flush', 'new', 'export', 'import'].includes(args.mode)) {
+  if (['help', 'stats', 'flush', 'new', 'export', 'import', 'tune-ttl'].includes(args.mode)) {
     const result = await handleCliCommand(args, cache);
     console.log(result.output);
     process.exit(result.exitCode);
@@ -88,7 +88,7 @@ async function main() {
   }
 
   const server = new Server(
-    { name: 'mcp-cache-proxy', version: '0.1.0' },
+    { name: 'mcp-cache-proxy', version: '0.3.0' },
     { capabilities: { tools: {} } }
   );
 
@@ -174,7 +174,23 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
+  // Start adaptive TTL background adaptor if any server has adaptiveTtl enabled
+  const hasAdaptiveTtl = Object.values(config.servers).some(s => s.adaptiveTtl);
+  let adaptorInterval: ReturnType<typeof setInterval> | undefined;
+  if (hasAdaptiveTtl) {
+    cache.initAdaptiveTtls(config.servers, router.getToolToServerMap());
+    adaptorInterval = setInterval(async () => {
+      try {
+        // Re-read tool mapping each cycle to pick up dynamic tool registrations
+        await cache.adaptTtls(config.servers, router.getToolToServerMap());
+      } catch (err) {
+        console.error('[ADAPTIVE-TTL] Background adaptor error:', err);
+      }
+    }, 10 * 60 * 1000);
+  }
+
   process.on('SIGINT', () => {
+    if (adaptorInterval) clearInterval(adaptorInterval);
     upstream.close();
     process.exit(0);
   });
