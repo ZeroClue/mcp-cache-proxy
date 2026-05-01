@@ -88,7 +88,7 @@ async function main() {
   }
 
   const server = new Server(
-    { name: 'mcp-cache-proxy', version: '0.3.0' },
+    { name: 'mcp-cache-proxy', version: '0.3.1' },
     { capabilities: { tools: {} } }
   );
 
