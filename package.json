@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mcp-cache-proxy": "./dist/index.js"
+    "mcp-cache-proxy": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -38,7 +38,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ZeroClue/mcp-cache-proxy.git"
+    "url": "git+https://github.com/ZeroClue/mcp-cache-proxy.git"
   },
   "bugs": {
     "url": "https://github.com/ZeroClue/mcp-cache-proxy/issues"
