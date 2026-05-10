@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-11
+
+### Added
+
+- **Proxy statistics**: Comprehensive per-server request tracking and metrics
+  - New `ServerStats` and `ProxyStats` interfaces for tracking upstream server performance
+  - Tracks total requests, successful requests, failed requests per server
+  - Tracks failures by tool name (`failedByTool`) for identifying problematic tools
+  - Tracks failures by error type (`failedByErrorType`) for monitoring failure patterns
+  - Tracks active in-flight requests per server for real-time load monitoring
+  - New `getProxyStats()` method on `UpstreamManager` aggregates stats across all servers
+  - New `resetStats()` method to clear stats for specific servers or all servers
+  - Error classification: `quota_exceeded`, `timeout`, `connection_refused`, `http_4xx`, `http_5xx`, `upstream_down`, `unknown`
+  - Each error type includes retryable flag for intelligent failover decisions
+
+- **Enhanced cache_stats() tool**: Now includes both cache and proxy metrics
+  - Cache metrics: cached, hits, hitRate, misses, sizeBytes, staleHits, savedCalls, byTool
+  - Proxy metrics: totalRequests, successful, failed, successfulByServer, failedByServer, byServer
+  - Per-server breakdown includes: totalRequests, successful, failed, failedByTool, failedByErrorType, activeRequests
+
+- **Enhanced --stats CLI command**: Outputs combined cache and proxy statistics when upstream manager is available
+
+### Changed
+
+- `cache_stats()` tool description updated to reflect new proxy metrics inclusion
+- `--stats` CLI output now includes `proxyStats` field when running in server mode
+
+### Testing
+
+- Added comprehensive test suite for proxy statistics (13 tests in `proxy-stats.test.ts`)
+- Tests cover: empty stats, successful request tracking, failed request tracking, error classification, multi-server aggregation, active request tracking, stats reset
+- All error classification types tested with appropriate assertions
+- All tests pass (13/13 passing)
+
 ## [0.3.1] - 2026-05-02
 
 ### Fixed

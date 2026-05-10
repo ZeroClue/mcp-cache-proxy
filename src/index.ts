@@ -55,7 +55,14 @@ async function main() {
       }
     }
 
-    const router = new ToolRouter(cache, config.servers, config.mode, config.cache.negativeCacheTtlSeconds);
+    const router = new ToolRouter(
+      cache, 
+      config.servers, 
+      config.mode, 
+      config.cache.negativeCacheTtlSeconds,
+      config.failover,
+      upstream
+    );
 
     // Register upstream tools
     for (const [serverName] of Object.entries(config.servers)) {
@@ -92,12 +99,19 @@ async function main() {
     { capabilities: { tools: {} } }
   );
 
-  const router = new ToolRouter(cache, config.servers, config.mode, config.cache.negativeCacheTtlSeconds);
+  const router = new ToolRouter(
+    cache, 
+    config.servers, 
+    config.mode, 
+    config.cache.negativeCacheTtlSeconds,
+    config.failover,
+    upstream
+  );
 
   // Register cache management tools
   router.registerTool({
     name: 'cache_stats',
-    description: 'Get cache statistics',
+    description: 'Get cache and proxy statistics including per-tool breakdown and upstream server metrics',
     inputSchema: { type: 'object', properties: {} }
   });
 
@@ -140,8 +154,9 @@ async function main() {
     try {
       // Handle cache management tools
       if (name === 'cache_stats') {
-        const stats = await cache.getStats();
-        return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
+        const cacheStats = await cache.getStats();
+        const proxyStats = upstream.getProxyStats();
+        return { content: [{ type: 'text', text: JSON.stringify({ ...cacheStats, proxyStats }, null, 2) }] };
       }
 
       if (name === 'cache_flush') {

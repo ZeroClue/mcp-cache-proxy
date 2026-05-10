@@ -160,9 +160,19 @@ export async function handleCliCommand(
         };
       }
       case 'stats': {
-        const stats = await cache.getStats();
+        const cacheStats = await cache.getStats();
+
+        // Include proxy stats if upstream manager is available
+        let output: string;
+        if (upstream) {
+          const proxyStats = upstream.getProxyStats();
+          output = JSON.stringify({ ...cacheStats, proxyStats }, null, 2);
+        } else {
+          output = JSON.stringify(cacheStats, null, 2);
+        }
+
         return {
-          output: JSON.stringify(stats, null, 2),
+          output,
           exitCode: 0
         };
       }

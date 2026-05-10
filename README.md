@@ -11,6 +11,7 @@ A caching proxy server for MCP (Model Context Protocol) tool calls. Reduces API 
 - **WAL mode** — concurrent read performance for multi-process access
 - **Cost savings counter** — tracks avoided API calls in stats
 - **Adaptive TTL tuning** — automatically adjusts TTLs based on eviction patterns (opt-in per server)
+- **Proxy statistics** — tracks per-server request metrics (total, successful, failed, active requests, failure classification)
 - Supports both stdio and HTTP-based MCP servers
 - **Negative caching** for errors with configurable TTL
 - **Per-entry size limits** to prevent cache bloat
@@ -136,7 +137,9 @@ The proxy runs as an MCP server and exposes all upstream tools plus cache manage
 ### Cache Management Tools
 
 The proxy adds these tools to any MCP client:
-- `cache_stats()` — Get cache statistics including per-tool breakdown (cached, hits, hitRate, misses, sizeBytes, staleHits, savedCalls, byTool)
+- `cache_stats()` — Get cache and proxy statistics including per-tool breakdown and upstream server metrics
+  - **Cache metrics:** cached, hits, hitRate, misses, sizeBytes, staleHits, savedCalls, byTool
+  - **Proxy metrics:** totalRequests, successful, failed, successfulByServer, failedByServer, byServer (detailed per-server breakdown with failedByTool, failedByErrorType, activeRequests)
 - `cache_flush(tool?)` — Flush cache entries (all or specific tool)
 - `cache_new()` — Recreate cache database
 
@@ -195,7 +198,7 @@ Any MCP-compliant client can connect to this proxy via stdio. Consult your clien
 ### CLI Commands
 
 ```bash
-# Show cache statistics
+# Show cache and proxy statistics (includes upstream server metrics)
 mcp-cache-proxy --stats
 
 # Flush all cache
