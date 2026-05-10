@@ -55,14 +55,7 @@ async function main() {
       }
     }
 
-    const router = new ToolRouter(
-      cache, 
-      config.servers, 
-      config.mode, 
-      config.cache.negativeCacheTtlSeconds,
-      config.failover,
-      upstream
-    );
+    const router = new ToolRouter(cache, config.servers, config.mode, config.cache.negativeCacheTtlSeconds);
 
     // Register upstream tools
     for (const [serverName] of Object.entries(config.servers)) {
@@ -99,14 +92,7 @@ async function main() {
     { capabilities: { tools: {} } }
   );
 
-  const router = new ToolRouter(
-    cache, 
-    config.servers, 
-    config.mode, 
-    config.cache.negativeCacheTtlSeconds,
-    config.failover,
-    upstream
-  );
+  const router = new ToolRouter(cache, config.servers, config.mode, config.cache.negativeCacheTtlSeconds);
 
   // Register cache management tools
   router.registerTool({

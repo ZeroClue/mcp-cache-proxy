@@ -1,0 +1,54 @@
+{
+  "servers": {
+    "searxng": {
+      "command": "npx",
+      "args": ["-y", "mcp-searxng"],
+      "env": { "SEARXNG_URL": "https://search.vm1.styx.web.za" },
+      "priority": 1,
+      "tags": ["web-search"],
+      "cacheTtlSeconds": 86400,
+      "negativeCacheTtlSeconds": 300
+    },
+    "web-search-prime": {
+      "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
+      "env": { "Z_AI_API_KEY": "" },
+      "priority": 2,
+      "tags": ["web-search"],
+      "cacheTtlSeconds": 86400,
+      "negativeCacheTtlSeconds": 300
+    },
+    "web-reader": {
+      "command": "npx",
+      "args": ["-y", "@zai-mcp/web-reader"],
+      "priority": 1,
+      "tags": ["web-read"],
+      "cacheTtlSeconds": 21600,
+      "negativeCacheTtlSeconds": 600
+    },
+    "zread": {
+      "command": "npx",
+      "args": ["-y", "@zai-mcp/zread"],
+      "priority": 2,
+      "tags": ["web-read"],
+      "cacheTtlSeconds": 3600,
+      "negativeCacheTtlSeconds": 300
+    }
+  },
+  "cache": {
+    "path": "~/.mcp-cache-proxy/cache.db",
+    "maxSizeBytes": 104857600,
+    "maxEntrySizeBytes": 10485760,
+    "defaultTtlSeconds": 43200,
+    "negativeCacheTtlSeconds": 300,
+    "staleWhileRevalidateSeconds": 0
+  },
+  "mode": "whitelist",
+  "extendGlobal": true,
+  "failover": {
+    "enabled": true,
+    "strategy": "priority",
+    "onErrors": ["quota_exceeded", "timeout", "http_429", "http_5xx", "connection_refused"],
+    "cacheByActualServer": true,
+    "maxRetries": 3
+  }
+}
