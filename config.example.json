@@ -29,6 +29,22 @@
       "cacheTtlRange": { "min": 3600, "max": 86400 }
     }
   },
+  "onDemandServers": {
+    "n8n-mcp": {
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": {
+        "N8N_API_URL": "https://n8n.example.com",
+        "N8N_API_KEY": ""
+      },
+      "idleTimeoutSeconds": 1800
+    },
+    "chrome-devtools-mcp": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/chrome-devtools-mcp"],
+      "idleTimeoutSeconds": 3600
+    }
+  },
   "cache": {
     "path": "~/.mcp-cache-proxy/cache.db",
     "maxSizeBytes": 104857600,

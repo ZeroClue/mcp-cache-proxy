@@ -12,6 +12,7 @@ import { loadConfigWithProjectLookup } from './config.js';
 import { CacheStore } from './cache.js';
 import { ToolRouter } from './proxy.js';
 import { UpstreamManager } from './upstream.js';
+import { GatewayManager } from './gateway.js';
 import { parseCliArgs, handleCliCommand } from './cli.js';
 
 async function main() {
@@ -130,6 +131,49 @@ async function main() {
     }
   }
 
+  // Set up gateway for on-demand servers
+  let gateway: GatewayManager | undefined;
+  if (config.onDemandServers && Object.keys(config.onDemandServers).length > 0) {
+    gateway = new GatewayManager(upstream, router, config.onDemandServers);
+
+    // Register meta-tools for on-demand servers
+    for (const metaTool of gateway.getMetaTools()) {
+      router.registerTool(metaTool);
+    }
+
+    // Register gateway management tools
+    router.registerTool({
+      name: 'gateway_status',
+      description: 'Get status of all on-demand (lazy-loaded) servers: loaded/unloaded, idle time, tool counts',
+      inputSchema: { type: 'object', properties: {} }
+    });
+
+    router.registerTool({
+      name: 'gateway_unload',
+      description: 'Force-unload an on-demand server immediately (refuses if requests are in-flight)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          server_name: { type: 'string', description: 'Name of the on-demand server to unload' }
+        },
+        required: ['server_name']
+      }
+    });
+
+    router.registerTool({
+      name: 'describe_tool',
+      description: 'Get the full input schema for a sub-tool on an on-demand server. Discovers tools if server not yet loaded.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          server_name: { type: 'string', description: 'Name of the on-demand server' },
+          tool_name: { type: 'string', description: 'Name of the sub-tool' }
+        },
+        required: ['server_name', 'tool_name']
+      }
+    });
+  }
+
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: router.getTools()
   }));
@@ -142,7 +186,8 @@ async function main() {
       if (name === 'cache_stats') {
         const cacheStats = await cache.getStats();
         const proxyStats = upstream.getProxyStats();
-        return { content: [{ type: 'text', text: JSON.stringify({ ...cacheStats, proxyStats }, null, 2) }] };
+        const gatewayStatus = gateway?.getStatus();
+        return { content: [{ type: 'text', text: JSON.stringify({ ...cacheStats, proxyStats, gateway: gatewayStatus }, null, 2) }] };
       }
 
       if (name === 'cache_flush') {
@@ -153,6 +198,33 @@ async function main() {
       if (name === 'cache_new') {
         await cache.recreate();
         return { content: [{ type: 'text', text: 'Cache recreated' }] };
+      }
+
+      // Handle gateway management tools
+      if (name === 'gateway_status' && gateway) {
+        return { content: [{ type: 'text', text: JSON.stringify(gateway.getStatus(), null, 2) }] };
+      }
+
+      if (name === 'gateway_unload' && gateway) {
+        const { server_name } = args as { server_name: string };
+        const result = await gateway.unloadServer(server_name);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      }
+
+      if (name === 'describe_tool' && gateway) {
+        const { server_name, tool_name } = args as { server_name: string; tool_name: string };
+        const schema = await gateway.describeTool(server_name, tool_name);
+        if (!schema) {
+          return { content: [{ type: 'text', text: `Tool "${tool_name}" not found on ${server_name}` }], isError: true };
+        }
+        return { content: [{ type: 'text', text: JSON.stringify(schema, null, 2) }] };
+      }
+
+      // Handle meta-tool calls (on-demand servers)
+      if (gateway?.isMetaTool(name)) {
+        const serverName = gateway.getServerForMetaTool(name)!;
+        const metaArgs = args as { tool_name: string; arguments?: unknown };
+        return await gateway.routeCall(serverName, metaArgs.tool_name, metaArgs.arguments) as { content: unknown };
       }
 
       // Route to upstream
@@ -192,6 +264,7 @@ async function main() {
 
   process.on('SIGINT', () => {
     if (adaptorInterval) clearInterval(adaptorInterval);
+    gateway?.close();
     upstream.close();
     process.exit(0);
   });

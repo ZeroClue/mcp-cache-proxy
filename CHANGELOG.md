@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-18
+
+### Added
+
+- **On-demand server gateway**: Lazy-load MCP servers to reduce context window and startup overhead
+  - New `onDemandServers` configuration section for servers that should load on first use
+  - `GatewayManager` class manages lazy loading, idle timeouts, and auto-unload
+  - Meta-tools pattern: Each on-demand server exposes `<server_name>_call` tool (e.g., `n8n_mcp_call`)
+  - `idleTimeoutSeconds` config option controls auto-unload delay (default: 1800 = 30 minutes)
+  - Concurrent load guard prevents duplicate server initialization
+  - Active request tracking prevents unloading servers with in-flight requests
+  - New `gateway_status()` tool shows loaded/unloaded state, idle time, and tool count per on-demand server
+  - Tool schema caching: Discovered tools are cached in memory until server unloads
+  - Significant context window savings: ~22k tokens saved by moving infrequently used servers to on-demand
+
+### Changed
+
+- Tool router now supports dynamic tool registration/unregistration for on-demand servers
+- `cache_stats()` output includes `gateway` field when on-demand servers are configured
+
+### Configuration
+
+New configuration option:
+
+```json
+{
+  "onDemandServers": {
+    "n8n-mcp": {
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": {"N8N_API_URL": "...", "N8N_API_KEY": ""},
+      "idleTimeoutSeconds": 1800
+    }
+  }
+}
+```
+
+### Use Cases
+
+- Infrequently used tools (e.g., n8n workflow automation, Chrome DevTools)
+- Reducing Claude Code context window for faster inference
+- Faster startup by deferring server initialization
+- Resource-constrained environments
+
 ## [0.4.1] - 2026-05-11
 
 ### Changed

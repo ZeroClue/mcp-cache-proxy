@@ -12,6 +12,7 @@ A caching proxy server for MCP (Model Context Protocol) tool calls. Reduces API 
 - **Cost savings counter** — tracks avoided API calls in stats
 - **Adaptive TTL tuning** — automatically adjusts TTLs based on eviction patterns (opt-in per server)
 - **Proxy statistics** — tracks per-server request metrics (total, successful, failed, active requests, failure classification)
+- **On-demand server gateway** — lazy-load MCP servers to reduce context window and startup overhead
 - Supports both stdio and HTTP-based MCP servers
 - **Negative caching** for errors with configurable TTL
 - **Per-entry size limits** to prevent cache bloat
@@ -111,6 +112,49 @@ Create `~/.mcp-cache-proxy/config.json`:
 - `negativeCacheTtlSeconds`: Default negative cache TTL for errors (default: 300)
 - `staleWhileRevalidateSeconds`: Grace period after TTL expiry to serve stale data while refreshing (default: 0 = disabled)
 
+### On-Demand Servers (Gateway Mode)
+
+Reduce startup overhead and context window usage by lazy-loading MCP servers. Servers configured under `onDemandServers` are not loaded until first use and automatically unload after a period of inactivity.
+
+```json
+{
+  "onDemandServers": {
+    "n8n-mcp": {
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": {
+        "N8N_API_URL": "https://n8n.example.com",
+        "N8N_API_KEY": ""
+      },
+      "idleTimeoutSeconds": 1800
+    },
+    "chrome-devtools-mcp": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/chrome-devtools-mcp"],
+      "idleTimeoutSeconds": 3600
+    }
+  }
+}
+```
+
+**On-demand server options:**
+- `command`: Command to spawn the server process
+- `args`: Arguments passed to the command
+- `env`: Environment variables (empty string uses `process.env[KEY]`)
+- `idleTimeoutSeconds`: Seconds of inactivity before auto-unload (default: 1800 = 30 minutes)
+
+**How it works:**
+1. On-demand servers expose a single meta-tool: `<server_name>_call` (e.g., `n8n_mcp_call`)
+2. First call to the meta-tool loads the server and discovers available tools
+3. Subsequent calls use the cached tool schemas and route directly
+4. Server auto-unloads after `idleTimeoutSeconds` of no activity
+5. Use `gateway_status()` tool to check which servers are currently loaded
+
+**Benefits:**
+- Smaller context window: Tools only loaded when needed
+- Faster startup: Infrequently used servers don't slow down initial connection
+- Resource efficiency: Idle servers disconnect automatically
+
 See `config.example.json` for all options.
 
 ### Project-Specific Config
@@ -140,8 +184,10 @@ The proxy adds these tools to any MCP client:
 - `cache_stats()` — Get cache and proxy statistics including per-tool breakdown and upstream server metrics
   - **Cache metrics:** cached, hits, hitRate, misses, sizeBytes, staleHits, savedCalls, byTool
   - **Proxy metrics:** totalRequests, successful, failed, successfulByServer, failedByServer, byServer (detailed per-server breakdown with failedByTool, failedByErrorType, activeRequests)
+  - **Gateway metrics:** gateway status showing loaded/unloaded state of on-demand servers (when configured)
 - `cache_flush(tool?)` — Flush cache entries (all or specific tool)
 - `cache_new()` — Recreate cache database
+- `gateway_status()` — Get status of all on-demand servers (loaded/unloaded, idle time, tool count) — only available when `onDemandServers` is configured
 
 ### Client Configuration
 
@@ -335,6 +381,9 @@ MCP Cache Proxy
 Real MCP Servers (search-prime, web-reader, zread, etc.)
        ↕
   SQLite cache (~/.mcp-cache-proxy/cache.db)
+
+Gateway (optional, when onDemandServers configured):
+Meta-tools (<server>_call) → Lazy-load on first use → Auto-unload when idle
 ```
 
 The proxy:
@@ -344,6 +393,7 @@ The proxy:
 4. On miss: calls upstream server, caches result with TTL
 5. On hit: returns cached result, increments hit counter
 6. Auto-evicts when cache size exceeds maxSizeBytes (LRU)
+7. Gateway: Loads on-demand servers on first meta-tool call, unloads after idle timeout
 
 ## Contributing
 

@@ -46,6 +46,18 @@ export class ToolRouter {
     return new Map(this.toolToServer);
   }
 
+  unregisterToolsForServer(serverName: string): number {
+    let removed = 0;
+    for (const [toolName, srv] of this.toolToServer.entries()) {
+      if (srv === serverName) {
+        this.tools.delete(toolName);
+        this.toolToServer.delete(toolName);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
   private resolveTtl(toolName: string, serverName: string | null): number {
     if (serverName && (this.servers[serverName] as { adaptiveTtl?: boolean }).adaptiveTtl) {
       const adaptiveTtl = this.cache.getAdaptiveTtl(toolName);

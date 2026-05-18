@@ -245,6 +245,24 @@ export class UpstreamManager {
     }
   }
 
+  disconnectServer(serverName: string): boolean {
+    const client = this.clients.get(serverName);
+    if (!client) return false;
+
+    client.close();
+    this.clients.delete(serverName);
+
+    const childProcess = this.processes.get(serverName);
+    if (childProcess) {
+      childProcess.kill();
+      this.processes.delete(serverName);
+    }
+
+    this.serverStats.delete(serverName);
+    this.activeRequests.delete(serverName);
+    return true;
+  }
+
   close(): void {
     for (const client of this.clients.values()) {
       client.close();

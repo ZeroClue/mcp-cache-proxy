@@ -14,6 +14,10 @@ export interface ServerConfig {
   cacheTtlRange?: { min: number; max: number };   // TTL bounds for adaptive tuning
 }
 
+export interface OnDemandServerConfig extends ServerConfig {
+  idleTimeoutSeconds?: number;
+}
+
 export interface CacheConfig {
   path: string;
   maxSizeBytes: number;
@@ -28,6 +32,7 @@ export interface Config {
   cache: CacheConfig;
   mode: 'whitelist' | 'blacklist';
   extendGlobal?: boolean;
+  onDemandServers?: Record<string, OnDemandServerConfig>;
 }
 
 const DEFAULT_CACHE_CONFIG: CacheConfig = {
@@ -54,7 +59,8 @@ async function loadConfig(configPath: URL | string): Promise<Config> {
     servers: config.servers as Record<string, ServerConfig>,
     cache: { ...DEFAULT_CACHE_CONFIG, ...config.cache },
     mode: config.mode || 'whitelist',
-    extendGlobal: config.extendGlobal !== false
+    extendGlobal: config.extendGlobal !== false,
+    onDemandServers: config.onDemandServers
   };
 }
 
@@ -69,7 +75,8 @@ function mergeConfigs(base: Config, override: Partial<Config>): Config {
     servers: { ...base.servers },
     cache: { ...base.cache },
     mode: override.mode ?? base.mode,
-    extendGlobal: override.extendGlobal ?? base.extendGlobal
+    extendGlobal: override.extendGlobal ?? base.extendGlobal,
+    onDemandServers: { ...base.onDemandServers }
   };
 
   // Merge servers - replace entire server objects, don't merge fields
@@ -85,6 +92,14 @@ function mergeConfigs(base: Config, override: Partial<Config>): Config {
   // Merge cache config - replace arrays/primitives, not deep merge
   if (override.cache) {
     merged.cache = { ...base.cache, ...override.cache };
+  }
+
+  // Merge on-demand servers
+  if (override.onDemandServers) {
+    merged.onDemandServers = {
+      ...(base.onDemandServers || {}),
+      ...override.onDemandServers
+    };
   }
 
   return merged;
